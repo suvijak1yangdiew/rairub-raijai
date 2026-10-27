@@ -16,6 +16,12 @@ var PHOTO_FOLDER_NAME = "รูปใบเสร็จ (แอปรายร�
 var HEADERS = ["รหัส", "วันที่", "ประเภท", "หมวด", "จำนวนเงิน (บาท)", "บันทึก", "วิธีจ่าย", "รูปใบเสร็จ", "จดเมื่อ", "แก้ล่าสุด"];
 var PHOTO_COLUMN = 8;
 
+// กด "เรียกใช้" ฟังก์ชันนี้ครั้งเดียวในหน้า Apps Script เพื่อให้ Google ขอสิทธิ์ใช้ Google Drive
+// และสร้างโฟลเดอร์รูปใบเสร็จไว้ล่วงหน้า
+function setupPhotoFolder() {
+  Logger.log("โฟลเดอร์รูปใบเสร็จ: " + getPhotoFolder_().getUrl());
+}
+
 // ใช้ตอนแอปทดสอบการเชื่อมต่อ; photos บอกแอปว่าชีตรุ่นนี้รับรูปได้
 function doGet() {
   return json_({ ok: true, app: "rairub-raijai", photos: true });
