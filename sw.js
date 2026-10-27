@@ -1,6 +1,6 @@
 // เก็บไฟล์ของแอปไว้ในเครื่อง เพื่อให้เปิดได้ตอนไม่มีเน็ต
 // ถ้ามีเน็ตจะโหลดไฟล์ล่าสุดเสมอ (แอปจะอัปเดตเองเมื่อแก้ไฟล์บน GitHub)
-const CACHE = "rairub-raijai-v1";
+const CACHE = "rairub-raijai-v2";
 const APP_FILES = [
   "./",
   "./index.html",
@@ -33,7 +33,9 @@ self.addEventListener("fetch", (event) => {
 
 async function networkFirst(event, request) {
   const cache = await caches.open(CACHE);
-  const network = fetch(request).then((response) => {
+  // ถาม GitHub ทุกครั้งว่ามีไฟล์ใหม่ไหม (no-cache) ไม่ใช้สำเนาเก่าที่เบราว์เซอร์เก็บไว้ได้นาน 10 นาที
+  // ใช้ request.url เพราะสร้างคำขอใหม่จากคำขอเปิดหน้าเว็บพร้อมตัวเลือกไม่ได้
+  const network = fetch(request.url, { cache: "no-cache", credentials: "same-origin" }).then((response) => {
     if (response.ok) cache.put(request, response.clone());
     return response;
   });
