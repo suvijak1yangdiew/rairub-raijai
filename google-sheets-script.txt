@@ -2,17 +2,23 @@
  * สมุดรายรับรายจ่าย: รับข้อมูลจากแอปมาเก็บในชีตนี้
  * วิธีติดตั้งอยู่ในไฟล์ คู่มือ-google-sheets.md
  *
- * แอปส่งมาได้ 2 แบบ:
+ * แอปส่งมาได้ 4 แบบ:
  *   { ops: [{ op: "upsert", row }, { op: "delete", id }] }  ส่งเฉพาะรายการที่เปลี่ยน
  *   { mode: "replace", rows: [row, ...] }                    ส่งทั้งหมด เขียนทับทั้งชีต
+ *   { action: "uploadPhoto", id, date, type, data }          เก็บรูปใบเสร็จ (base64) ใน Google Drive
+ *   { action: "trashPhotos", fileIds: [...] }                ย้ายรูปที่เลิกใช้ไปถังขยะของ Drive
+ *
+ * รูปเก็บในโฟลเดอร์ "รูปใบเสร็จ (แอปรายรับรายจ่าย)" แบบส่วนตัว เปิดได้เฉพาะเจ้าของบัญชี
  */
 
 var SHEET_NAME = "รายการ";
-var HEADERS = ["รหัส", "วันที่", "ประเภท", "หมวด", "จำนวนเงิน (บาท)", "บันทึก", "วิธีจ่าย", "มีรูปใบเสร็จ", "จดเมื่อ", "แก้ล่าสุด"];
+var PHOTO_FOLDER_NAME = "รูปใบเสร็จ (แอปรายรับรายจ่าย)";
+var HEADERS = ["รหัส", "วันที่", "ประเภท", "หมวด", "จำนวนเงิน (บาท)", "บันทึก", "วิธีจ่าย", "รูปใบเสร็จ", "จดเมื่อ", "แก้ล่าสุด"];
+var PHOTO_COLUMN = 8;
 
-// ใช้ตอนแอปทดสอบการเชื่อมต่อ
+// ใช้ตอนแอปทดสอบการเชื่อมต่อ; photos บอกแอปว่าชีตรุ่นนี้รับรูปได้
 function doGet() {
-  return json_({ ok: true, app: "rairub-raijai" });
+  return json_({ ok: true, app: "rairub-raijai", photos: true });
 }
 
 function doPost(e) {
@@ -20,6 +26,12 @@ function doPost(e) {
   lock.waitLock(30000);
   try {
     var body = JSON.parse(e.postData.contents);
+    if (body.action === "uploadPhoto") return json_({ ok: true, fileId: uploadPhoto_(body) });
+    if (body.action === "trashPhotos") {
+      trashPhotos_(body.fileIds || []);
+      return json_({ ok: true });
+    }
+
     var sheet = getSheet_();
     if (body.mode === "replace") {
       replaceAll_(sheet, body.rows || []);
@@ -41,11 +53,12 @@ function getSheet_() {
   var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = spreadsheet.getSheetByName(SHEET_NAME) || spreadsheet.insertSheet(SHEET_NAME);
   if (sheet.getLastRow() === 0) {
-    sheet.appendRow(HEADERS);
     sheet.setFrozenRows(1);
     sheet.getRange(1, 1, 1, HEADERS.length).setFontWeight("bold");
     sheet.getRange("A:A").setNumberFormat("@");
   }
+  // เขียนหัวตารางทุกครั้ง เพื่อให้ชีตเก่าได้ชื่อคอลัมน์ใหม่ด้วย
+  sheet.getRange(1, 1, 1, HEADERS.length).setValues([HEADERS]);
   return sheet;
 }
 
@@ -58,10 +71,18 @@ function toValues_(row) {
     Number(row.amount),
     row.note || "",
     row.payment || "",
-    row.hasReceipt ? "มี" : "",
+    "", // รูปใบเสร็จ เขียนแยกเป็นลิงก์ใน photoCell_
     row.createdAt ? new Date(row.createdAt) : "",
     row.updatedAt ? new Date(row.updatedAt) : "",
   ];
+}
+
+// ช่องรูป: ลิงก์ "ดูรูป" ถ้าส่งรูปแล้ว, "มี (กำลังส่งรูป)" ถ้ายังไม่ถึง, ว่างถ้าไม่มีรูป
+function photoCell_(row) {
+  if (row.receiptUrl) {
+    return SpreadsheetApp.newRichTextValue().setText("ดูรูป").setLinkUrl(row.receiptUrl).build();
+  }
+  return SpreadsheetApp.newRichTextValue().setText(row.hasReceipt ? "มี (กำลังส่งรูป)" : "").build();
 }
 
 // หาแถวจากรหัส; คืนเลขแถวในชีต หรือ 0 ถ้าไม่มี
@@ -78,8 +99,13 @@ function findRow_(sheet, id) {
 function upsertRow_(sheet, row) {
   var values = toValues_(row);
   var at = findRow_(sheet, row.id);
-  if (at) sheet.getRange(at, 1, 1, values.length).setValues([values]);
-  else sheet.appendRow(values);
+  if (!at) {
+    sheet.appendRow(values);
+    at = sheet.getLastRow();
+  } else {
+    sheet.getRange(at, 1, 1, values.length).setValues([values]);
+  }
+  sheet.getRange(at, PHOTO_COLUMN).setRichTextValue(photoCell_(row));
 }
 
 function deleteRow_(sheet, id) {
@@ -92,6 +118,44 @@ function replaceAll_(sheet, rows) {
   if (last > 1) sheet.getRange(2, 1, last - 1, HEADERS.length).clearContent();
   if (rows.length === 0) return;
   sheet.getRange(2, 1, rows.length, HEADERS.length).setValues(rows.map(toValues_));
+  sheet.getRange(2, PHOTO_COLUMN, rows.length, 1).setRichTextValues(rows.map(function (row) {
+    return [photoCell_(row)];
+  }));
+}
+
+// โฟลเดอร์รูปจำไว้ด้วยรหัส จึงย้ายหรือเปลี่ยนชื่อโฟลเดอร์ได้โดยไม่หลุด
+function getPhotoFolder_() {
+  var properties = PropertiesService.getScriptProperties();
+  var folderId = properties.getProperty("photoFolderId");
+  if (folderId) {
+    try {
+      var existing = DriveApp.getFolderById(folderId);
+      if (!existing.isTrashed()) return existing;
+    } catch (error) {
+      // โฟลเดอร์ถูกลบไปแล้ว สร้างใหม่
+    }
+  }
+  var folder = DriveApp.createFolder(PHOTO_FOLDER_NAME);
+  properties.setProperty("photoFolderId", folder.getId());
+  return folder;
+}
+
+function uploadPhoto_(body) {
+  var type = body.type || "image/jpeg";
+  var extension = type === "image/png" ? ".png" : ".jpg";
+  var name = (body.date || "") + "_" + body.id + extension;
+  var blob = Utilities.newBlob(Utilities.base64Decode(body.data), type, name);
+  return getPhotoFolder_().createFile(blob).getId();
+}
+
+function trashPhotos_(fileIds) {
+  fileIds.forEach(function (fileId) {
+    try {
+      DriveApp.getFileById(fileId).setTrashed(true);
+    } catch (error) {
+      // ไฟล์ถูกลบไปแล้ว ไม่ต้องทำอะไร
+    }
+  });
 }
 
 function json_(value) {

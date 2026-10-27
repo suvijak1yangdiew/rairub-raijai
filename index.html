@@ -805,7 +805,7 @@
 
       <h2>สำรองอัตโนมัติ (Google Sheets)</h2>
       <div id="sheet-connect">
-        <p class="hint-text">ส่งทุกรายการที่จด แก้ หรือลบ เข้า Google Sheets ของคุณเอง ไม่มีเน็ตก็จดได้ แอปจะส่งให้เองเมื่อเน็ตกลับมา (รูปใบเสร็จไม่ถูกส่ง ใช้ "สำรองเป็นไฟล์" แทน)</p>
+        <p class="hint-text">ส่งทุกรายการที่จด แก้ หรือลบ เข้า Google Sheets ของคุณเอง ไม่มีเน็ตก็จดได้ แอปจะส่งให้เองเมื่อเน็ตกลับมา รูปใบเสร็จเก็บใน Google Drive ของคุณ และในชีตมีลิงก์ "ดูรูป" ที่เปิดได้เฉพาะคุณ</p>
         <label class="hint-text" for="sheet-url">วางลิงก์ที่ได้จาก Google Sheets (ลงท้ายด้วย /exec)</label>
         <input class="note-input" id="sheet-url" type="url" inputmode="url" autocomplete="off" placeholder="https://script.google.com/macros/s/.../exec">
         <p class="error" id="sheet-error" hidden></p>
@@ -1588,6 +1588,12 @@
     let pendingCount = 0;
     let syncError = false;
     let syncing = null;
+    // รูปใบเสร็จใน Google Drive: รหัสรายการ → รหัสไฟล์ใน Drive (เก็บในเครื่องนี้)
+    let photoFiles = {};
+    // รหัสไฟล์ที่เลิกใช้แล้ว รอย้ายไปถังขยะของ Drive
+    let photoTrash = [];
+    // null = ส่งรูปได้ปกติ, "unsupported" = โค้ดในชีตยังเป็นรุ่นที่ไม่รับรูป, "failed" = ส่งไม่สำเร็จ
+    let photoProblem = null;
 
     function getSetting(key) {
       return new Promise((resolve, reject) => {
@@ -1611,9 +1617,70 @@
         note: entry.note ?? "",
         payment: PAYMENT_LABELS[entry.payment] ?? "",
         hasReceipt: Boolean(entry.receipt),
+        receiptUrl: entry.receipt && photoFiles[entry.id]
+          ? `https://drive.google.com/file/d/${photoFiles[entry.id]}/view`
+          : "",
         createdAt: entry.createdAt,
         updatedAt: entry.updatedAt ?? entry.createdAt,
       };
+    }
+
+    async function savePhotoState() {
+      await setSetting("photoFiles", photoFiles);
+      await setSetting("photoTrash", photoTrash);
+    }
+
+    // รูปของรายการนี้ถูกเปลี่ยน: รูปเก่าใน Drive เลิกใช้ ต้องส่งรูปใหม่
+    async function forgetPhoto(entryId) {
+      if (!photoFiles[entryId]) return;
+      photoTrash.push(photoFiles[entryId]);
+      delete photoFiles[entryId];
+      await savePhotoState();
+    }
+
+    // ส่งรูปที่ยังไม่อยู่ใน Drive ทีละรูป แล้วอัปเดตแถวในชีตให้มีลิงก์
+    // ส่งรูปไม่ได้ไม่ทำให้การส่งรายการหยุด รูปจะถูกลองส่งใหม่รอบหน้า
+    async function syncPhotos() {
+      const waiting = entries.filter((entry) => entry.receipt && !photoFiles[entry.id]);
+      const uploaded = [];
+      try {
+        for (const entry of waiting) {
+          const dataUrl = await blobToDataUrl(entry.receipt);
+          const result = await sendToSheet({
+            action: "uploadPhoto",
+            id: entry.id,
+            date: entry.date,
+            type: entry.receipt.type || "image/jpeg",
+            data: dataUrl.slice(dataUrl.indexOf(",") + 1),
+          });
+          if (!result.fileId) throw new Error("unsupported");
+          photoFiles[entry.id] = result.fileId;
+          uploaded.push(entry);
+          await savePhotoState();
+        }
+        photoProblem = null;
+      } catch (error) {
+        photoProblem = error.message === "unsupported" ? "unsupported" : "failed";
+      }
+      if (uploaded.length > 0) {
+        await sendToSheet({ ops: uploaded.map((entry) => ({ op: "upsert", row: toSheetRow(entry) })) });
+      }
+
+      // รูปของรายการที่ถูกลบ หรือถูกเอารูปออก ย้ายไปถังขยะของ Drive (กู้คืนได้ 30 วัน)
+      const current = new Map(entries.map((entry) => [entry.id, entry]));
+      Object.keys(photoFiles).forEach((entryId) => {
+        if (!current.get(entryId)?.receipt) {
+          photoTrash.push(photoFiles[entryId]);
+          delete photoFiles[entryId];
+        }
+      });
+      if (photoTrash.length > 0) {
+        const trashing = [...photoTrash];
+        await savePhotoState();
+        await sendToSheet({ action: "trashPhotos", fileIds: trashing });
+        photoTrash = photoTrash.filter((fileId) => !trashing.includes(fileId));
+        await savePhotoState();
+      }
     }
 
     async function sendToSheet(payload) {
@@ -1629,6 +1696,7 @@
         });
         const result = await response.json();
         if (!result.ok) throw new Error(result.error || "ชีตตอบกลับว่าไม่สำเร็จ");
+        return result;
       } finally {
         clearTimeout(timer);
       }
@@ -1679,13 +1747,12 @@
       if (!sheetUrl || !db) return;
       const queued = await getAll(db, "outbox");
       pendingCount = needsFullSync ? entries.length : queued.length;
-      if (!needsFullSync && queued.length === 0) {
-        renderSyncStatus();
-        return;
-      }
+      const hasRowsToSend = needsFullSync || queued.length > 0;
 
       try {
-        if (needsFullSync) {
+        if (!hasRowsToSend) {
+          // ไม่มีรายการค้าง ไปส่งรูปต่อ
+        } else if (needsFullSync) {
           await sendToSheet({ mode: "replace", rows: entries.map(toSheetRow) });
           needsFullSync = false;
           await setSetting("needsFullSync", false);
@@ -1702,11 +1769,22 @@
           await sendToSheet({ ops });
           await removeFromOutbox(queued);
         }
+        if (hasRowsToSend) {
+          lastSyncAt = new Date().toISOString();
+          await setSetting("lastSyncAt", lastSyncAt);
+        }
         syncError = false;
-        lastSyncAt = new Date().toISOString();
-        await setSetting("lastSyncAt", lastSyncAt);
       } catch (error) {
         syncError = true;
+      }
+
+      // ส่งรูปหลังรายการส่งสำเร็จแล้วเท่านั้น (ถ้าไม่มีเน็ต รอบนี้ไม่ต้องลอง)
+      if (!syncError) {
+        try {
+          await syncPhotos();
+        } catch (error) {
+          photoProblem = photoProblem ?? "failed";
+        }
       }
       pendingCount = needsFullSync ? entries.length : (await getAll(db, "outbox")).length;
       renderSyncStatus();
@@ -1749,9 +1827,20 @@
       } else {
         lines.push("ส่งครบทุกรายการแล้ว ✓");
       }
+
+      const withPhoto = entries.filter((entry) => entry.receipt);
+      const photosSent = withPhoto.filter((entry) => photoFiles[entry.id]).length;
+      const photosWaiting = withPhoto.length - photosSent;
+      if (withPhoto.length > 0) {
+        if (photosWaiting === 0) lines.push(`รูปใบเสร็จอยู่ใน Google Drive ครบ ${photosSent} รูป ✓`);
+        else if (photoProblem === "unsupported") lines.push(`รูปใบเสร็จยังส่งไม่ได้ ${photosWaiting} รูป: ต้องอัปเดตโค้ดในชีตก่อน`);
+        else if (photoProblem === "failed" || syncError) lines.push(`รูปใบเสร็จยังส่งไม่สำเร็จ ${photosWaiting} รูป จะลองใหม่เอง`);
+        else lines.push(`กำลังส่งรูปใบเสร็จ ${photosWaiting} รูป`);
+      }
+
       const status = document.getElementById("sync-status");
       status.textContent = lines.join(" · ");
-      status.classList.toggle("error", syncError && pendingCount > 0);
+      status.classList.toggle("error", (syncError && pendingCount > 0) || (photoProblem !== null && photosWaiting > 0));
     }
 
     async function connectSheet(url) {
@@ -1777,6 +1866,11 @@
       lastSyncAt = null;
       syncError = false;
       pendingCount = 0;
+      // ชีตใหม่อาจเป็นคนละ Drive จึงลืมว่ารูปไหนส่งไปแล้ว (รูปใน Drive เดิมยังอยู่)
+      photoFiles = {};
+      photoTrash = [];
+      photoProblem = null;
+      await savePhotoState();
       await setSetting("sheetUrl", null);
       await setSetting("needsFullSync", false);
       await setSetting("lastSyncAt", null);
@@ -1788,6 +1882,8 @@
       sheetUrl = await getSetting("sheetUrl");
       lastSyncAt = await getSetting("lastSyncAt");
       needsFullSync = Boolean(await getSetting("needsFullSync"));
+      photoFiles = (await getSetting("photoFiles")) ?? {};
+      photoTrash = (await getSetting("photoTrash")) ?? [];
     }
 
     function renderSettings() {
@@ -2215,10 +2311,15 @@
         return;
       }
 
+      // รูปใบเสร็จถูกเปลี่ยนเป็นรูปใหม่: รูปเดิมใน Drive เลิกใช้ ต้องส่งรูปใหม่แทน
+      const receiptReplaced = Boolean(editingEntry?.receipt && entry.receipt && editingEntry.receipt !== entry.receipt);
+
       entries = entries.filter((existing) => existing.id !== entry.id);
       entries.push(entry);
       refreshLists();
-      queueSync([entry.id], "upsert").catch(() => {});
+      (receiptReplaced ? forgetPhoto(entry.id) : Promise.resolve())
+        .then(() => queueSync([entry.id], "upsert"))
+        .catch(() => {});
       closeAddView();
       showToast(date === todayKey() ? "บันทึกแล้ว ✓" : "บันทึกแล้ว ✓ ลง" + formatThaiDate(date));
     });
