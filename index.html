@@ -921,6 +921,31 @@
       });
     }
 
+    // iPhone (WebKit) เก็บรูปแบบ Blob ลงที่เก็บข้อมูลไม่ได้เสมอไป จึงเก็บรูปเป็นไบต์ + ชนิดไฟล์
+    // ในแอปยังใช้รูปเป็น Blob ตามปกติ แปลงเฉพาะตอนเขียนและอ่านที่เก็บข้อมูลเท่านั้น
+    async function toStoredEntry(entry) {
+      if (!(entry.receipt instanceof Blob)) return entry;
+      const bytes = entry.receipt.arrayBuffer
+        ? await entry.receipt.arrayBuffer()
+        : await new Response(entry.receipt).arrayBuffer();
+      return { ...entry, receipt: { type: entry.receipt.type, bytes } };
+    }
+
+    // รายการเก่าที่เคยเก็บรูปเป็น Blob ไว้แล้วยังอ่านได้เหมือนเดิม
+    function fromStoredEntry(stored) {
+      const receipt = stored.receipt;
+      if (!receipt || receipt instanceof Blob) return stored;
+      return { ...stored, receipt: new Blob([receipt.bytes], { type: receipt.type }) };
+    }
+
+    async function saveEntry(entry) {
+      await put(db, "entries", await toStoredEntry(entry));
+    }
+
+    async function loadEntries() {
+      return (await getAll(db, "entries")).map(fromStoredEntry);
+    }
+
     function put(db, storeName, value) {
       return new Promise((resolve, reject) => {
         const transaction = db.transaction(storeName, "readwrite");
@@ -1358,19 +1383,18 @@
     }
 
     // ลบหมวด และย้ายรายการของหมวดนั้นไป "อื่นๆ" ในครั้งเดียว ถ้าพลาดจะไม่มีอะไรเปลี่ยน
-    function deleteCategory(category) {
+    async function deleteCategory(category) {
       const otherId = OTHER_CATEGORY[category.type];
+      const now = new Date().toISOString();
+      const moved = entries
+        .filter((entry) => entry.categoryId === category.id)
+        .map((entry) => ({ ...entry, categoryId: otherId, updatedAt: now }));
+      // แปลงก่อนเปิดการเขียน เพราะการเขียนจะปิดเองถ้ารอระหว่างทาง
+      const stored = await Promise.all(moved.map(toStoredEntry));
       return new Promise((resolve, reject) => {
         const transaction = db.transaction(["entries", "categories"], "readwrite");
         const entryStore = transaction.objectStore("entries");
-        const moved = [];
-        entries
-          .filter((entry) => entry.categoryId === category.id)
-          .forEach((entry) => {
-            const updated = { ...entry, categoryId: otherId, updatedAt: new Date().toISOString() };
-            entryStore.put(updated);
-            moved.push(updated);
-          });
+        stored.forEach((entry) => entryStore.put(entry));
         transaction.objectStore("categories").delete(category.id);
         transaction.oncomplete = () => resolve(moved);
         transaction.onerror = () => reject(transaction.error);
@@ -1468,7 +1492,8 @@
     }
 
     // แทนที่ข้อมูลทั้งหมดในครั้งเดียว ถ้าพลาดข้อมูลเดิมจะยังอยู่ครบ
-    function replaceAllData(newCategories, newEntries) {
+    async function replaceAllData(newCategories, newEntries) {
+      const storedEntries = await Promise.all(newEntries.map(toStoredEntry));
       return new Promise((resolve, reject) => {
         const transaction = db.transaction(["entries", "categories"], "readwrite");
         const entryStore = transaction.objectStore("entries");
@@ -1476,7 +1501,7 @@
         entryStore.clear();
         categoryStore.clear();
         newCategories.forEach((category) => categoryStore.put(category));
-        newEntries.forEach((entry) => entryStore.put(entry));
+        storedEntries.forEach((entry) => entryStore.put(entry));
         transaction.oncomplete = () => resolve();
         transaction.onerror = () => reject(transaction.error);
       });
@@ -1882,15 +1907,18 @@
       };
 
       try {
-        await put(db, "entries", entry);
-        entries = entries.filter((existing) => existing.id !== entry.id);
-        entries.push(entry);
-        refreshLists();
-        closeAddView();
-        showToast(date === todayKey() ? "บันทึกแล้ว ✓" : "บันทึกแล้ว ✓ ลง" + formatThaiDate(date));
+        await saveEntry(entry);
       } catch (error) {
-        showToast("บันทึกไม่สำเร็จ ลองใหม่อีกครั้ง", true);
+        // แสดงรหัสสาเหตุไว้ด้วย เพื่อให้แจ้งปัญหาได้ตรงจุด
+        showToast(`บันทึกไม่สำเร็จ ลองใหม่อีกครั้ง (รหัส: ${error?.name ?? "ไม่ทราบ"})`, true);
+        return;
       }
+
+      entries = entries.filter((existing) => existing.id !== entry.id);
+      entries.push(entry);
+      refreshLists();
+      closeAddView();
+      showToast(date === todayKey() ? "บันทึกแล้ว ✓" : "บันทึกแล้ว ✓ ลง" + formatThaiDate(date));
     });
 
     // ---------- ใช้งานแบบไม่มีเน็ต (ทำงานเฉพาะตอนเปิดผ่านเว็บ ไม่ใช่เปิดไฟล์ในเครื่อง) ----------
@@ -1909,7 +1937,7 @@
       try {
         db = await openDb();
         categories = await getAll(db, "categories");
-        entries = await getAll(db, "entries");
+        entries = await loadEntries();
         renderHome();
       } catch (error) {
         document.getElementById("add-button").disabled = true;
