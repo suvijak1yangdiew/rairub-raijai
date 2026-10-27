@@ -1,0 +1,1921 @@
+<!doctype html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1f5f4a">
+  <title>สมุดรายรับรายจ่าย</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" type="image/png" href="icon-192.png">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="รายรับรายจ่าย">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <style>
+    :root {
+      --bg: #f6f3ec;
+      --card: #ffffff;
+      --text: #1d1d1b;
+      --muted: #55524a;
+      --line: #ddd6c8;
+      --income: #1b6b3a;
+      --expense: #b3261e;
+      --balance: #1d3f8f;
+      --primary: #1f5f4a;
+      --primary-text: #ffffff;
+      --base: 22px;
+    }
+
+    :root.large-text {
+      --base: 28px;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body { margin: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Leelawadee UI", "Thonburi", "Noto Sans Thai", "Sarabun", Tahoma, sans-serif;
+      font-size: var(--base);
+      line-height: 1.5;
+      min-height: 100vh;
+    }
+
+    [hidden] { display: none !important; }
+
+    .app {
+      max-width: 560px;
+      margin: 0 auto;
+      padding: 16px 16px 140px;
+    }
+
+    header h1 {
+      font-size: 1.3em;
+      margin: 8px 0 4px;
+    }
+
+    header .month {
+      color: var(--muted);
+      margin: 0 0 16px;
+    }
+
+    .summary {
+      display: grid;
+      gap: 12px;
+    }
+
+    .tile {
+      background: var(--card);
+      border: 2px solid var(--line);
+      border-radius: 16px;
+      padding: 14px 18px;
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .tile .label {
+      font-size: 1em;
+      color: var(--muted);
+    }
+
+    .tile .amount {
+      font-size: 1.6em;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .tile.income .amount { color: var(--income); }
+    .tile.expense .amount { color: var(--expense); }
+    .tile.balance { border-color: var(--balance); }
+    .tile.balance .amount { color: var(--balance); }
+
+    .today h2 {
+      font-size: 1.1em;
+      margin: 28px 0 8px;
+    }
+
+    .empty {
+      background: var(--card);
+      border: 2px dashed var(--line);
+      border-radius: 16px;
+      padding: 20px;
+      color: var(--muted);
+      text-align: center;
+      margin: 0;
+    }
+
+    .entry-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: grid;
+      gap: 10px;
+    }
+
+    .entry {
+      background: var(--card);
+      border: 2px solid var(--line);
+      border-radius: 16px;
+      padding: 8px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .entry-main {
+      flex: 1;
+      min-height: 56px;
+      padding: 6px 10px;
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 12px;
+      flex-wrap: wrap;
+      border: 0;
+      border-radius: 12px;
+      background: transparent;
+      color: inherit;
+      font: inherit;
+      text-align: left;
+      cursor: pointer;
+    }
+
+    .entry .name { flex: 1; }
+
+    .thumb-button {
+      width: 64px;
+      height: 64px;
+      padding: 0;
+      border: 2px solid var(--line);
+      border-radius: 12px;
+      background: var(--bg);
+      overflow: hidden;
+      cursor: pointer;
+      align-self: center;
+    }
+
+    .thumb-button img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    .entry .detail {
+      display: block;
+      color: var(--muted);
+      font-size: 0.85em;
+    }
+
+    .entry .amount {
+      font-size: 1.2em;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .entry.income .amount { color: var(--income); }
+    .entry.expense .amount { color: var(--expense); }
+
+    .bottom-bar {
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+      background: linear-gradient(to top, var(--bg) 70%, transparent);
+    }
+
+    .big-button {
+      display: block;
+      width: 100%;
+      max-width: 528px;
+      margin: 0 auto;
+      min-height: 72px;
+      border: 0;
+      border-radius: 18px;
+      background: var(--primary);
+      color: var(--primary-text);
+      font: inherit;
+      font-size: 1.4em;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    button:focus-visible,
+    input:focus-visible {
+      outline: 4px solid var(--balance);
+      outline-offset: 3px;
+    }
+
+    /* หน้าจด */
+    .back-button {
+      min-height: 56px;
+      padding: 0 18px;
+      border: 2px solid var(--line);
+      border-radius: 14px;
+      background: var(--card);
+      color: var(--text);
+      font: inherit;
+      cursor: pointer;
+      margin: 8px 0 12px;
+    }
+
+    .add-form h2 {
+      font-size: 1.1em;
+      margin: 24px 0 8px;
+    }
+
+    .type-switch {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .choice {
+      min-height: 64px;
+      padding: 8px 12px;
+      border: 3px solid var(--line);
+      border-radius: 16px;
+      background: var(--card);
+      color: var(--text);
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+      overflow-wrap: anywhere;
+    }
+
+    .choice[aria-pressed="true"] {
+      border-color: var(--primary);
+      background: var(--primary);
+      color: var(--primary-text);
+    }
+
+    .type-switch .choice.expense[aria-pressed="true"] {
+      border-color: var(--expense);
+      background: var(--expense);
+    }
+
+    .type-switch .choice.income[aria-pressed="true"] {
+      border-color: var(--income);
+      background: var(--income);
+    }
+
+    .amount-input {
+      width: 100%;
+      min-height: 72px;
+      padding: 8px 16px;
+      border: 3px solid var(--line);
+      border-radius: 16px;
+      background: var(--card);
+      color: var(--text);
+      font: inherit;
+      font-size: 1.6em;
+      font-weight: 700;
+      text-align: right;
+    }
+
+    .date-quick {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .date-input {
+      width: 100%;
+      min-height: 64px;
+      padding: 8px 16px;
+      border: 3px solid var(--line);
+      border-radius: 16px;
+      background: var(--card);
+      color: var(--text);
+      font: inherit;
+    }
+
+    .date-label {
+      color: var(--muted);
+      margin: 8px 0 0;
+    }
+
+    .details-toggle {
+      width: 100%;
+      min-height: 60px;
+      margin-top: 28px;
+      border: 2px dashed var(--muted);
+      border-radius: 16px;
+      background: transparent;
+      color: var(--text);
+      font: inherit;
+      cursor: pointer;
+    }
+
+    .note-input {
+      width: 100%;
+      min-height: 64px;
+      padding: 8px 16px;
+      border: 3px solid var(--line);
+      border-radius: 16px;
+      background: var(--card);
+      color: var(--text);
+      font: inherit;
+    }
+
+    .payment-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(4.5em, 1fr));
+      gap: 12px;
+    }
+
+    .photo-button {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 100%;
+      min-height: 64px;
+      border: 3px solid var(--line);
+      border-radius: 16px;
+      background: var(--card);
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .photo-button input {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      opacity: 0;
+    }
+
+    .photo-button:focus-within {
+      outline: 4px solid var(--balance);
+      outline-offset: 3px;
+    }
+
+    .photo-preview {
+      margin-top: 12px;
+      display: grid;
+      gap: 12px;
+    }
+
+    .photo-preview img {
+      max-width: 100%;
+      max-height: 320px;
+      border-radius: 12px;
+      border: 2px solid var(--line);
+      justify-self: start;
+    }
+
+    .remove-photo {
+      min-height: 56px;
+      border: 2px solid var(--expense);
+      border-radius: 14px;
+      background: var(--card);
+      color: var(--expense);
+      font: inherit;
+      cursor: pointer;
+    }
+
+    .secondary-button {
+      display: block;
+      width: 100%;
+      min-height: 64px;
+      margin-top: 16px;
+      border: 3px solid var(--primary);
+      border-radius: 16px;
+      background: var(--card);
+      color: var(--primary);
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .history h1,
+    .add-form h1 {
+      font-size: 1.3em;
+      margin: 0 0 4px;
+    }
+
+    .month-nav {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin: 12px 0;
+    }
+
+    .month-nav button:disabled {
+      opacity: 0.35;
+      cursor: default;
+    }
+
+    .history .month-title {
+      font-size: 1.2em;
+      font-weight: 700;
+      text-align: center;
+      margin: 0 0 12px;
+    }
+
+    .history-filter {
+      margin-bottom: 16px;
+    }
+
+    .filter-choice {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 2px;
+    }
+
+    .filter-amount {
+      font-size: 0.85em;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .filter-amount.income { color: var(--income); }
+    .filter-amount.expense { color: var(--expense); }
+
+    .filter-choice[aria-pressed="true"] .filter-amount { color: var(--primary-text); }
+
+    .history h3 {
+      font-size: 1em;
+      color: var(--muted);
+      margin: 24px 0 8px;
+    }
+
+    .add-form h1 {
+      font-size: 1.3em;
+      margin: 0 0 4px;
+    }
+
+    .delete-entry {
+      width: 100%;
+      min-height: 64px;
+      margin-top: 28px;
+      border: 3px solid var(--expense);
+      border-radius: 16px;
+      background: var(--card);
+      color: var(--expense);
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .confirm {
+      position: fixed;
+      inset: 0;
+      z-index: 10;
+      background: rgba(0, 0, 0, 0.6);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+
+    .confirm-box {
+      width: 100%;
+      max-width: 480px;
+      background: var(--card);
+      border-radius: 20px;
+      padding: 24px;
+      display: grid;
+      gap: 12px;
+    }
+
+    .confirm-box p {
+      margin: 0 0 8px;
+      font-size: 1.2em;
+      font-weight: 700;
+      text-align: center;
+    }
+
+    .confirm-box button {
+      min-height: 64px;
+      border-radius: 16px;
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .confirm-yes {
+      border: 0;
+      background: var(--expense);
+      color: #ffffff;
+    }
+
+    .confirm-save {
+      border: 0;
+      background: var(--primary);
+      color: var(--primary-text);
+    }
+
+    .confirm-box .error {
+      margin: 0;
+      font-size: 1em;
+      text-align: left;
+    }
+
+    .header-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .header-row .back-button { margin: 0; }
+
+    .header-buttons {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .settings h1 {
+      font-size: 1.3em;
+      margin: 0 0 4px;
+    }
+
+    .settings h2 {
+      font-size: 1.1em;
+      margin: 24px 0 8px;
+    }
+
+    .hint-text {
+      color: var(--muted);
+      margin: 0 0 12px;
+    }
+
+    .file-button {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+    }
+
+    .file-button input {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      opacity: 0;
+    }
+
+    .file-button:focus-within {
+      outline: 4px solid var(--balance);
+      outline-offset: 3px;
+    }
+
+    .setting-list {
+      list-style: none;
+      margin: 16px 0 0;
+      padding: 0;
+      display: grid;
+      gap: 10px;
+    }
+
+    .setting-row {
+      background: var(--card);
+      border: 2px solid var(--line);
+      border-radius: 16px;
+      padding: 10px 12px 10px 18px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .setting-row .name {
+      flex: 1;
+      font-weight: 700;
+    }
+
+    .setting-row .hint {
+      color: var(--muted);
+      font-size: 0.85em;
+    }
+
+    .row-button {
+      min-height: 56px;
+      padding: 0 14px;
+      border: 2px solid var(--line);
+      border-radius: 12px;
+      background: var(--card);
+      color: var(--text);
+      font: inherit;
+      cursor: pointer;
+    }
+
+    .row-button.danger {
+      border-color: var(--expense);
+      color: var(--expense);
+    }
+
+    .confirm-no {
+      border: 3px solid var(--line);
+      background: var(--card);
+      color: var(--text);
+    }
+
+    .viewer {
+      position: fixed;
+      inset: 0;
+      z-index: 10;
+      background: rgba(0, 0, 0, 0.9);
+      display: flex;
+      flex-direction: column;
+      padding: 16px;
+      gap: 12px;
+    }
+
+    .viewer img {
+      flex: 1;
+      min-height: 0;
+      width: 100%;
+      object-fit: contain;
+    }
+
+    .viewer button {
+      min-height: 64px;
+      border: 0;
+      border-radius: 16px;
+      background: #ffffff;
+      color: var(--text);
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .category-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(5.5em, 1fr));
+      gap: 12px;
+    }
+
+    .error {
+      color: var(--expense);
+      font-weight: 700;
+      margin: 8px 0 0;
+    }
+
+    .toast {
+      position: fixed;
+      left: 16px;
+      right: 16px;
+      top: 16px;
+      max-width: 528px;
+      margin: 0 auto;
+      padding: 16px 20px;
+      border-radius: 16px;
+      background: var(--income);
+      color: #ffffff;
+      font-weight: 700;
+      text-align: center;
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+    }
+  </style>
+</head>
+<body>
+  <!-- หน้าแรก -->
+  <div id="home-view">
+    <main class="app">
+      <header>
+        <div class="header-row">
+          <h1>สมุดรายรับรายจ่าย</h1>
+          <div class="header-buttons">
+            <button class="back-button" id="text-size-button" type="button" aria-pressed="false"></button>
+            <button class="back-button" id="settings-button" type="button">⚙ ตั้งค่า</button>
+          </div>
+        </div>
+        <p class="month" id="month-label"></p>
+      </header>
+
+      <section class="summary" aria-label="สรุปเดือนนี้">
+        <div class="tile income">
+          <span class="label">รับเดือนนี้</span>
+          <span class="amount" id="total-income">0</span>
+        </div>
+        <div class="tile expense">
+          <span class="label">จ่ายเดือนนี้</span>
+          <span class="amount" id="total-expense">0</span>
+        </div>
+        <div class="tile balance">
+          <span class="label">คงเหลือ</span>
+          <span class="amount" id="total-balance">0</span>
+        </div>
+      </section>
+
+      <button class="secondary-button" id="history-button" type="button">📖 ดูย้อนหลัง</button>
+
+      <section class="today">
+        <h2>วันนี้</h2>
+        <p class="empty" id="today-empty">ยังไม่มีรายการวันนี้</p>
+        <ul class="entry-list" id="today-list"></ul>
+      </section>
+    </main>
+
+    <div class="bottom-bar">
+      <button class="big-button" id="add-button" type="button">+ จด</button>
+    </div>
+  </div>
+
+  <!-- หน้าดูย้อนหลัง -->
+  <div id="history-view" hidden>
+    <main class="app history">
+      <button class="back-button" id="history-back" type="button">◀ กลับหน้าแรก</button>
+      <h1>ดูย้อนหลัง</h1>
+
+      <div class="month-nav">
+        <button class="choice" id="prev-month" type="button">◀ เดือนก่อน</button>
+        <button class="choice" id="next-month" type="button">เดือนถัดไป ▶</button>
+      </div>
+      <p class="month-title" id="history-month"></p>
+
+      <div class="category-grid history-filter" id="history-categories" aria-label="เลือกหมวดที่จะดู"></div>
+
+      <section class="summary" aria-label="สรุปเดือนที่เลือก">
+        <div class="tile income">
+          <span class="label">รับ</span>
+          <span class="amount" id="history-income">0</span>
+        </div>
+        <div class="tile expense">
+          <span class="label">จ่าย</span>
+          <span class="amount" id="history-expense">0</span>
+        </div>
+        <div class="tile balance">
+          <span class="label">คงเหลือ</span>
+          <span class="amount" id="history-balance">0</span>
+        </div>
+      </section>
+
+      <p class="empty" id="history-empty" style="margin-top: 24px">ไม่มีรายการในเดือนนี้</p>
+      <div id="history-days"></div>
+    </main>
+  </div>
+
+  <!-- หน้าตั้งค่า -->
+  <div id="settings-view" hidden>
+    <main class="app settings">
+      <button class="back-button" id="settings-back" type="button">◀ กลับหน้าแรก</button>
+      <h1>ตั้งค่า</h1>
+
+      <h2>หมวดหมู่</h2>
+      <div class="type-switch" id="settings-type-switch">
+        <button class="choice expense" type="button" data-type="expense" aria-pressed="true">รายจ่าย</button>
+        <button class="choice income" type="button" data-type="income" aria-pressed="false">รายรับ</button>
+      </div>
+      <ul class="setting-list" id="settings-categories"></ul>
+      <button class="secondary-button" id="add-category" type="button">+ เพิ่มหมวดใหม่</button>
+
+      <h2>สำรองข้อมูล</h2>
+      <p class="hint-text">เก็บรายการ หมวดหมู่ และรูปใบเสร็จทั้งหมดไว้ในไฟล์เดียว แล้วส่งไปเก็บที่ LINE, Google Drive หรืออีเมลของตัวเอง ถ้าเปลี่ยนเครื่องหรือเครื่องหาย ใช้ไฟล์นี้นำข้อมูลกลับมาได้</p>
+      <button class="big-button" id="backup-button" type="button">💾 สำรองเป็นไฟล์</button>
+      <label class="secondary-button file-button">
+        <span>📂 นำข้อมูลกลับจากไฟล์</span>
+        <input id="restore-input" type="file" accept=".json,application/json">
+      </label>
+    </main>
+  </div>
+
+  <!-- หน้าจด -->
+  <div id="add-view" hidden>
+    <form class="app add-form" id="add-form" novalidate>
+      <button class="back-button" id="back-button" type="button">◀ กลับ</button>
+      <h1 id="form-title">จดรายการใหม่</h1>
+
+      <h2>เป็นเงินเข้าหรือเงินออก</h2>
+      <div class="type-switch">
+        <button class="choice expense" type="button" data-type="expense" aria-pressed="true">รายจ่าย</button>
+        <button class="choice income" type="button" data-type="income" aria-pressed="false">รายรับ</button>
+      </div>
+
+      <h2><label for="amount-input">จำนวนเงิน (บาท)</label></h2>
+      <input class="amount-input" id="amount-input" type="text" inputmode="decimal" autocomplete="off" placeholder="0">
+      <p class="error" id="amount-error" hidden>กรุณาใส่จำนวนเงิน</p>
+
+      <h2><label for="date-input">วันที่</label></h2>
+      <div class="date-quick">
+        <button class="choice" type="button" data-days-ago="0">วันนี้</button>
+        <button class="choice" type="button" data-days-ago="1">เมื่อวาน</button>
+      </div>
+      <input class="date-input" id="date-input" type="date">
+      <p class="date-label" id="date-label"></p>
+      <p class="error" id="date-error" hidden>กรุณาเลือกวันที่</p>
+
+      <h2>หมวดหมู่</h2>
+      <div class="category-grid" id="category-grid"></div>
+      <p class="error" id="category-error" hidden>กรุณาเลือกหมวดหมู่</p>
+
+      <button class="details-toggle" id="details-toggle" type="button" aria-expanded="false" aria-controls="details"></button>
+      <div id="details" hidden>
+        <h2><label for="note-input">บันทึกสั้นๆ</label></h2>
+        <input class="note-input" id="note-input" type="text" maxlength="100" autocomplete="off" placeholder="เช่น กาแฟหน้าบ้าน">
+
+        <div id="payment-section">
+          <h2>จ่ายด้วย</h2>
+          <div class="payment-grid" id="payment-grid">
+            <button class="choice" type="button" data-payment="cash" aria-pressed="false">เงินสด</button>
+            <button class="choice" type="button" data-payment="transfer" aria-pressed="false">โอน</button>
+            <button class="choice" type="button" data-payment="card" aria-pressed="false">บัตร</button>
+          </div>
+        </div>
+
+        <h2>รูปใบเสร็จ</h2>
+        <label class="photo-button" id="photo-button">
+          <span>📷 ถ่ายรูป / เลือกรูปใบเสร็จ</span>
+          <input id="photo-input" type="file" accept="image/*">
+        </label>
+        <div class="photo-preview" id="photo-preview" hidden>
+          <img id="photo-preview-img" alt="รูปใบเสร็จที่แนบ">
+          <button class="remove-photo" id="remove-photo" type="button">ลบรูปนี้</button>
+        </div>
+      </div>
+
+      <button class="delete-entry" id="delete-entry" type="button" hidden>🗑 ลบรายการนี้</button>
+
+      <div class="bottom-bar">
+        <button class="big-button" id="save-button" type="submit">บันทึก</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="confirm" id="confirm" role="alertdialog" aria-modal="true" aria-labelledby="confirm-text" hidden>
+    <div class="confirm-box">
+      <p id="confirm-text"></p>
+      <button class="confirm-yes" id="confirm-yes" type="button">ลบ</button>
+      <button class="confirm-no" id="confirm-no" type="button">ไม่ลบ</button>
+    </div>
+  </div>
+
+  <div class="confirm" id="name-dialog" role="dialog" aria-modal="true" aria-labelledby="name-dialog-title" hidden>
+    <form class="confirm-box" id="name-form" novalidate>
+      <p id="name-dialog-title"></p>
+      <input class="note-input" id="name-input" type="text" maxlength="30" autocomplete="off" aria-labelledby="name-dialog-title">
+      <p class="error" id="name-error" hidden></p>
+      <button class="confirm-save" type="submit">บันทึก</button>
+      <button class="confirm-no" id="name-cancel" type="button">ยกเลิก</button>
+    </form>
+  </div>
+
+  <div class="viewer" id="viewer" role="dialog" aria-modal="true" aria-label="รูปใบเสร็จ" hidden>
+    <img id="viewer-img" alt="รูปใบเสร็จ">
+    <button id="viewer-close" type="button">ปิดรูป ✕</button>
+  </div>
+
+  <p class="toast" id="toast" role="status" hidden></p>
+
+  <script>
+    // ---------- ที่เก็บข้อมูลในเครื่อง ----------
+    const DB_NAME = "rairub-raijai";
+    const DB_VERSION = 1;
+
+    const DEFAULT_CATEGORIES = [
+      { id: "food", type: "expense", name: "อาหาร" },
+      { id: "travel", type: "expense", name: "เดินทาง" },
+      { id: "home", type: "expense", name: "ที่พักและค่าน้ำค่าไฟ" },
+      { id: "shopping", type: "expense", name: "ช้อปปิ้ง" },
+      { id: "health", type: "expense", name: "สุขภาพ" },
+      { id: "fun", type: "expense", name: "บันเทิง" },
+      { id: "expense-other", type: "expense", name: "อื่นๆ" },
+      { id: "salary", type: "income", name: "เงินเดือน" },
+      { id: "side-job", type: "income", name: "งานเสริม" },
+      { id: "income-other", type: "income", name: "อื่นๆ" },
+    ];
+
+    const PAYMENT_LABELS = { cash: "เงินสด", transfer: "โอน", card: "บัตร" };
+
+    function openDb() {
+      return new Promise((resolve, reject) => {
+        const request = indexedDB.open(DB_NAME, DB_VERSION);
+        request.onupgradeneeded = () => {
+          const db = request.result;
+          db.createObjectStore("entries", { keyPath: "id" });
+          const categories = db.createObjectStore("categories", { keyPath: "id" });
+          DEFAULT_CATEGORIES.forEach((category, order) => categories.add({ ...category, order }));
+        };
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+    }
+
+    function getAll(db, storeName) {
+      return new Promise((resolve, reject) => {
+        const request = db.transaction(storeName).objectStore(storeName).getAll();
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+    }
+
+    function remove(db, storeName, key) {
+      return new Promise((resolve, reject) => {
+        const transaction = db.transaction(storeName, "readwrite");
+        transaction.objectStore(storeName).delete(key);
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+      });
+    }
+
+    function put(db, storeName, value) {
+      return new Promise((resolve, reject) => {
+        const transaction = db.transaction(storeName, "readwrite");
+        transaction.objectStore(storeName).put(value);
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+      });
+    }
+
+    // ---------- ตัวช่วย ----------
+    function newId() {
+      return Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+    }
+
+    // วันที่ตามเวลาในเครื่อง ในรูปแบบ "2026-10-27"
+    function dateKey(date) {
+      const month = String(date.getMonth() + 1).padStart(2, "0");
+      const day = String(date.getDate()).padStart(2, "0");
+      return `${date.getFullYear()}-${month}-${day}`;
+    }
+
+    function todayKey() {
+      return dateKey(new Date());
+    }
+
+    function daysAgoKey(days) {
+      const date = new Date();
+      date.setDate(date.getDate() - days);
+      return dateKey(date);
+    }
+
+    // "2026-10-27" → "วันอังคารที่ 27 ตุลาคม 2569"
+    function formatThaiDate(key) {
+      const [year, month, day] = key.split("-").map(Number);
+      return new Date(year, month - 1, day).toLocaleDateString("th-TH", {
+        weekday: "long", day: "numeric", month: "long", year: "numeric",
+      });
+    }
+
+    // แปลงข้อความที่พิมพ์เป็นสตางค์ (จำนวนเต็ม) เช่น "1,250.5" → 125050; ใส่ผิดรูปแบบหรือไม่เกิน 0 → null
+    function parseAmountToSatang(text) {
+      const cleaned = text.replace(/[,\s]/g, "");
+      if (!/^\d+(\.\d{1,2})?$/.test(cleaned)) return null;
+      const satang = Math.round(Number(cleaned) * 100);
+      return satang > 0 ? satang : null;
+    }
+
+    // ย่อรูปให้ด้านยาวไม่เกิน 1280px และบีบเป็น JPEG เพื่อไม่ให้กินพื้นที่เครื่อง
+    async function shrinkImage(file) {
+      const url = URL.createObjectURL(file);
+      try {
+        const image = new Image();
+        image.src = url;
+        await image.decode();
+        const scale = Math.min(1, 1280 / Math.max(image.naturalWidth, image.naturalHeight));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.round(image.naturalWidth * scale);
+        canvas.height = Math.round(image.naturalHeight * scale);
+        canvas.getContext("2d").drawImage(image, 0, 0, canvas.width, canvas.height);
+        const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.7));
+        if (!blob) throw new Error("ย่อรูปไม่สำเร็จ");
+        return blob;
+      } finally {
+        URL.revokeObjectURL(url);
+      }
+    }
+
+    // แสดงสตางค์เป็นบาท เช่น 125050 → "1,250.50", 5000 → "50"
+    function formatBaht(satang) {
+      const hasSatang = satang % 100 !== 0;
+      return (satang / 100).toLocaleString("th-TH", {
+        minimumFractionDigits: hasSatang ? 2 : 0,
+        maximumFractionDigits: 2,
+      });
+    }
+
+    // ---------- หน้าจอ ----------
+    const homeView = document.getElementById("home-view");
+    const addView = document.getElementById("add-view");
+    const historyView = document.getElementById("history-view");
+    const addForm = document.getElementById("add-form");
+    const amountInput = document.getElementById("amount-input");
+    const amountError = document.getElementById("amount-error");
+    const dateInput = document.getElementById("date-input");
+    const dateLabel = document.getElementById("date-label");
+    const dateError = document.getElementById("date-error");
+    const dateQuickButtons = document.querySelectorAll(".date-quick .choice");
+    const detailsToggle = document.getElementById("details-toggle");
+    const details = document.getElementById("details");
+    const noteInput = document.getElementById("note-input");
+    const paymentSection = document.getElementById("payment-section");
+    const paymentButtons = document.querySelectorAll("#payment-grid .choice");
+    const photoInput = document.getElementById("photo-input");
+    const photoButton = document.getElementById("photo-button");
+    const photoPreview = document.getElementById("photo-preview");
+    const photoPreviewImg = document.getElementById("photo-preview-img");
+    const viewer = document.getElementById("viewer");
+    const viewerImg = document.getElementById("viewer-img");
+    const categoryGrid = document.getElementById("category-grid");
+    const categoryError = document.getElementById("category-error");
+    const typeButtons = document.querySelectorAll(".type-switch .choice");
+    const toast = document.getElementById("toast");
+    const formTitle = document.getElementById("form-title");
+    const saveButton = document.getElementById("save-button");
+    const deleteButton = document.getElementById("delete-entry");
+    const settingsView = document.getElementById("settings-view");
+    const settingsTypeButtons = document.querySelectorAll("#settings-type-switch .choice");
+
+    // ขนาดตัวหนังสือ: จำไว้ในเครื่องนี้ ถ้าเครื่องไม่ยอมให้จำ ก็ยังสลับได้ตามปกติ
+    const TEXT_SIZE_KEY = "large-text";
+    const textSizeButton = document.getElementById("text-size-button");
+
+    function applyTextSize(large) {
+      document.documentElement.classList.toggle("large-text", large);
+      textSizeButton.setAttribute("aria-pressed", String(large));
+      textSizeButton.textContent = large ? "ก− ตัวปกติ" : "ก+ ตัวใหญ่";
+    }
+
+    try {
+      applyTextSize(localStorage.getItem(TEXT_SIZE_KEY) === "1");
+    } catch (error) {
+      applyTextSize(false);
+    }
+
+    textSizeButton.addEventListener("click", () => {
+      const large = !document.documentElement.classList.contains("large-text");
+      applyTextSize(large);
+      try {
+        localStorage.setItem(TEXT_SIZE_KEY, large ? "1" : "0");
+      } catch (error) {
+        // จำไม่ได้ก็ไม่เป็นไร ครั้งหน้าจะกลับเป็นขนาดปกติ
+      }
+    });
+
+    document.getElementById("month-label").textContent =
+      "เดือน" + new Date().toLocaleDateString("th-TH", { month: "long", year: "numeric" });
+
+    let db = null;
+    let categories = [];
+    let entries = [];
+    let selectedType = "expense";
+    let selectedCategoryId = null;
+    let selectedPayment = null;
+    let selectedReceipt = null;
+    let editingEntry = null;
+    let toastTimer = null;
+    // ลิงก์รูปที่สร้างไว้แสดงผล ต้องคืนหน่วยความจำเมื่อวาดหน้าใหม่
+    let homePhotoUrls = [];
+    let historyPhotoUrls = [];
+    let previewPhotoUrl = null;
+    let historyMonth = todayKey().slice(0, 7);
+    let historyCategoryId = null;
+    let settingsType = "expense";
+    // หน้าที่จะกลับไปหลังปิดหน้าจด
+    let returnView = null;
+
+    function showToast(message, isError = false) {
+      toast.textContent = message;
+      toast.style.background = isError ? "var(--expense)" : "var(--income)";
+      toast.hidden = false;
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => { toast.hidden = true; }, isError ? 6000 : 2500);
+    }
+
+    function sumTotals(list) {
+      let income = 0;
+      let expense = 0;
+      list.forEach((entry) => {
+        if (entry.type === "income") income += entry.amount;
+        else expense += entry.amount;
+      });
+      return { income, expense };
+    }
+
+    function showTotals(prefix, { income, expense }) {
+      const balance = income - expense;
+      document.getElementById(prefix + "-income").textContent = formatBaht(income);
+      document.getElementById(prefix + "-expense").textContent = formatBaht(expense);
+      document.getElementById(prefix + "-balance").textContent =
+        (balance < 0 ? "-" : "") + formatBaht(Math.abs(balance));
+    }
+
+    // ใหม่สุดขึ้นก่อน: เรียงตามวันที่ แล้วตามเวลาที่จด
+    function newestFirst(a, b) {
+      return b.date.localeCompare(a.date) || b.createdAt.localeCompare(a.createdAt);
+    }
+
+    // สร้างหนึ่งแถวรายการ; photoUrls เก็บลิงก์รูปไว้คืนหน่วยความจำตอนวาดใหม่
+    function createEntryItem(entry, categoryNames, photoUrls) {
+      const item = document.createElement("li");
+      item.className = "entry " + entry.type;
+
+      if (entry.receipt) {
+        const url = URL.createObjectURL(entry.receipt);
+        photoUrls.push(url);
+        const thumbButton = document.createElement("button");
+        thumbButton.type = "button";
+        thumbButton.className = "thumb-button";
+        thumbButton.setAttribute("aria-label", "ดูรูปใบเสร็จ");
+        const thumb = document.createElement("img");
+        thumb.src = url;
+        thumb.alt = "";
+        thumbButton.append(thumb);
+        thumbButton.addEventListener("click", () => openViewer(url));
+        item.append(thumbButton);
+      }
+
+      const name = document.createElement("span");
+      name.className = "name";
+      name.textContent = categoryNames.get(entry.categoryId) ?? "อื่นๆ";
+
+      const detailText = [entry.note, PAYMENT_LABELS[entry.payment]].filter(Boolean).join(" · ");
+      if (detailText) {
+        const detail = document.createElement("span");
+        detail.className = "detail";
+        detail.textContent = detailText;
+        name.append(detail);
+      }
+
+      const amount = document.createElement("span");
+      amount.className = "amount";
+      amount.textContent = (entry.type === "income" ? "+" : "-") + formatBaht(entry.amount);
+
+      const main = document.createElement("button");
+      main.type = "button";
+      main.className = "entry-main";
+      main.setAttribute("aria-label", "แก้รายการ " + name.textContent + " " + amount.textContent);
+      main.append(name, amount);
+      main.addEventListener("click", () => openAddView(entry));
+
+      item.append(main);
+      return item;
+    }
+
+    function categoryNameMap() {
+      return new Map(categories.map((category) => [category.id, category.name]));
+    }
+
+    function renderHome() {
+      const today = todayKey();
+      showTotals("total", sumTotals(entries.filter((entry) => entry.date.startsWith(today.slice(0, 7)))));
+
+      const categoryNames = categoryNameMap();
+      const todayEntries = entries.filter((entry) => entry.date === today).sort(newestFirst);
+
+      const list = document.getElementById("today-list");
+      homePhotoUrls.forEach((url) => URL.revokeObjectURL(url));
+      homePhotoUrls = [];
+      list.replaceChildren(...todayEntries.map((entry) => createEntryItem(entry, categoryNames, homePhotoUrls)));
+      document.getElementById("today-empty").hidden = todayEntries.length > 0;
+    }
+
+    // historyMonth อยู่ในรูปแบบ "2026-10"
+    function shiftMonth(monthKey, delta) {
+      const [year, month] = monthKey.split("-").map(Number);
+      return dateKey(new Date(year, month - 1 + delta, 1)).slice(0, 7);
+    }
+
+    function renderHistory() {
+      const [year, month] = historyMonth.split("-").map(Number);
+      document.getElementById("history-month").textContent =
+        "เดือน" + new Date(year, month - 1, 1).toLocaleDateString("th-TH", { month: "long", year: "numeric" });
+      document.getElementById("next-month").disabled = historyMonth >= todayKey().slice(0, 7);
+
+      const monthEntries = entries.filter((entry) => entry.date.startsWith(historyMonth)).sort(newestFirst);
+      const categoryNames = categoryNameMap();
+      renderHistoryFilter(monthEntries, categoryNames);
+
+      const shownEntries = historyCategoryId === null
+        ? monthEntries
+        : monthEntries.filter((entry) => entry.categoryId === historyCategoryId);
+      showTotals("history", sumTotals(shownEntries));
+
+      historyPhotoUrls.forEach((url) => URL.revokeObjectURL(url));
+      historyPhotoUrls = [];
+
+      const days = document.getElementById("history-days");
+      days.replaceChildren();
+      let currentDate = null;
+      let currentList = null;
+      shownEntries.forEach((entry) => {
+        if (entry.date !== currentDate) {
+          currentDate = entry.date;
+          const heading = document.createElement("h3");
+          heading.textContent = formatThaiDate(entry.date);
+          currentList = document.createElement("ul");
+          currentList.className = "entry-list";
+          days.append(heading, currentList);
+        }
+        currentList.append(createEntryItem(entry, categoryNames, historyPhotoUrls));
+      });
+      document.getElementById("history-empty").hidden = shownEntries.length > 0;
+    }
+
+    // ปุ่ม "ทุกหมวด" + ปุ่มของหมวดที่มีรายการในเดือนนี้ พร้อมยอดรวมของหมวด
+    function renderHistoryFilter(monthEntries, categoryNames) {
+      const totals = new Map();
+      monthEntries.forEach((entry) => {
+        const total = totals.get(entry.categoryId) ?? { type: entry.type, amount: 0 };
+        total.amount += entry.amount;
+        totals.set(entry.categoryId, total);
+      });
+
+      const order = new Map(categories.map((category) => [category.id, category]));
+      const ids = [...totals.keys()];
+      if (historyCategoryId !== null && !totals.has(historyCategoryId)) ids.push(historyCategoryId);
+      // รายจ่ายก่อนรายรับ แล้วเรียงตามลำดับหมวด
+      ids.sort((a, b) => {
+        const categoryA = order.get(a);
+        const categoryB = order.get(b);
+        const typeA = categoryA?.type ?? totals.get(a)?.type;
+        const typeB = categoryB?.type ?? totals.get(b)?.type;
+        if (typeA !== typeB) return typeA === "expense" ? -1 : 1;
+        const rank = (category) => (!category ? Infinity : isOtherCategory(category) ? 1e9 : category.order);
+        return rank(categoryA) - rank(categoryB);
+      });
+
+      const grid = document.getElementById("history-categories");
+      const makeButton = (id, label, amountText, type) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "choice filter-choice";
+        button.setAttribute("aria-pressed", String(historyCategoryId === id));
+        const name = document.createElement("span");
+        name.textContent = label;
+        button.append(name);
+        if (amountText) {
+          const amount = document.createElement("span");
+          amount.className = "filter-amount " + type;
+          amount.textContent = amountText;
+          button.append(amount);
+        }
+        button.addEventListener("click", () => {
+          historyCategoryId = id;
+          renderHistory();
+        });
+        return button;
+      };
+
+      grid.replaceChildren(
+        makeButton(null, "ทุกหมวด"),
+        ...ids.map((id) => {
+          const total = totals.get(id);
+          const type = order.get(id)?.type ?? total?.type ?? "expense";
+          const amountText = (type === "income" ? "+" : "-") + formatBaht(total?.amount ?? 0);
+          return makeButton(id, categoryNames.get(id) ?? "อื่นๆ", amountText, type);
+        }),
+      );
+    }
+
+    function showView(view) {
+      homeView.hidden = view !== homeView;
+      historyView.hidden = view !== historyView;
+      settingsView.hidden = view !== settingsView;
+      addView.hidden = view !== addView;
+      window.scrollTo(0, 0);
+    }
+
+    // กล่องถามยืนยันกลางจอ ตอบ true เมื่อกดปุ่มยืนยัน
+    function askConfirm(text, yesLabel = "ลบ", noLabel = "ไม่ลบ") {
+      const dialog = document.getElementById("confirm");
+      const yes = document.getElementById("confirm-yes");
+      const no = document.getElementById("confirm-no");
+      document.getElementById("confirm-text").textContent = text;
+      yes.textContent = yesLabel;
+      no.textContent = noLabel;
+      dialog.hidden = false;
+      no.focus();
+      return new Promise((resolve) => {
+        const finish = (answer) => {
+          dialog.hidden = true;
+          yes.onclick = null;
+          no.onclick = null;
+          resolve(answer);
+        };
+        yes.onclick = () => finish(true);
+        no.onclick = () => finish(false);
+      });
+    }
+
+    // กล่องพิมพ์ชื่อหมวด; validate คืนข้อความผิดพลาด หรือ null ถ้าใช้ได้; ตอบชื่อ หรือ null เมื่อยกเลิก
+    function askName(title, initial, validate) {
+      const dialog = document.getElementById("name-dialog");
+      const form = document.getElementById("name-form");
+      const input = document.getElementById("name-input");
+      const error = document.getElementById("name-error");
+      const cancel = document.getElementById("name-cancel");
+      document.getElementById("name-dialog-title").textContent = title;
+      input.value = initial;
+      error.hidden = true;
+      dialog.hidden = false;
+      input.focus();
+      return new Promise((resolve) => {
+        const finish = (answer) => {
+          dialog.hidden = true;
+          form.onsubmit = null;
+          cancel.onclick = null;
+          resolve(answer);
+        };
+        form.onsubmit = (event) => {
+          event.preventDefault();
+          const name = input.value.trim();
+          const message = validate(name);
+          if (message) {
+            error.textContent = message;
+            error.hidden = false;
+            input.focus();
+            return;
+          }
+          finish(name);
+        };
+        cancel.onclick = () => finish(null);
+      });
+    }
+
+    // หมวด "อื่นๆ" ของแต่ละฝั่งลบไม่ได้ เพราะเป็นที่รับรายการจากหมวดที่ถูกลบ
+    const OTHER_CATEGORY = { expense: "expense-other", income: "income-other" };
+
+    function isOtherCategory(category) {
+      return category.id === OTHER_CATEGORY[category.type];
+    }
+
+    // เรียงตามลำดับ โดยให้ "อื่นๆ" อยู่ท้ายเสมอ
+    function categoriesOfType(type) {
+      return categories
+        .filter((category) => category.type === type)
+        .sort((a, b) => (isOtherCategory(a) - isOtherCategory(b)) || a.order - b.order);
+    }
+
+    function nameProblem(name, type, exceptId = null) {
+      if (!name) return "กรุณาพิมพ์ชื่อหมวด";
+      const taken = categories.some((category) =>
+        category.type === type && category.id !== exceptId && category.name === name);
+      return taken ? "มีหมวดชื่อนี้อยู่แล้ว" : null;
+    }
+
+    // ลบหมวด และย้ายรายการของหมวดนั้นไป "อื่นๆ" ในครั้งเดียว ถ้าพลาดจะไม่มีอะไรเปลี่ยน
+    function deleteCategory(category) {
+      const otherId = OTHER_CATEGORY[category.type];
+      return new Promise((resolve, reject) => {
+        const transaction = db.transaction(["entries", "categories"], "readwrite");
+        const entryStore = transaction.objectStore("entries");
+        const moved = [];
+        entries
+          .filter((entry) => entry.categoryId === category.id)
+          .forEach((entry) => {
+            const updated = { ...entry, categoryId: otherId, updatedAt: new Date().toISOString() };
+            entryStore.put(updated);
+            moved.push(updated);
+          });
+        transaction.objectStore("categories").delete(category.id);
+        transaction.oncomplete = () => resolve(moved);
+        transaction.onerror = () => reject(transaction.error);
+      });
+    }
+
+    // ---------- สำรองและนำข้อมูลกลับ ----------
+    const BACKUP_FORMAT = "rairub-raijai-backup";
+    const BACKUP_VERSION = 1;
+
+    function blobToDataUrl(blob) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(blob);
+      });
+    }
+
+    function dataUrlToBlob(dataUrl) {
+      const match = /^data:([^;,]+);base64,(.*)$/.exec(dataUrl);
+      if (!match) return null;
+      const binary = atob(match[2]);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+      return new Blob([bytes], { type: match[1] });
+    }
+
+    async function buildBackup() {
+      const backupEntries = await Promise.all(entries.map(async (entry) => ({
+        ...entry,
+        receipt: entry.receipt ? await blobToDataUrl(entry.receipt) : null,
+      })));
+      return {
+        format: BACKUP_FORMAT,
+        version: BACKUP_VERSION,
+        exportedAt: new Date().toISOString(),
+        categories,
+        entries: backupEntries,
+      };
+    }
+
+    const isText = (value) => typeof value === "string";
+
+    // ตรวจไฟล์สำรองทีละช่อง; คืน { ok: true, categories, entries } หรือ { ok: false, reason }
+    function parseBackup(data) {
+      if (!data || data.format !== BACKUP_FORMAT) return { ok: false, reason: "ไฟล์นี้ไม่ใช่ไฟล์สำรองของแอปนี้" };
+      if (data.version !== BACKUP_VERSION) return { ok: false, reason: "ไฟล์สำรองนี้มาจากแอปรุ่นที่ต่างกัน" };
+      if (!Array.isArray(data.categories) || !Array.isArray(data.entries)) {
+        return { ok: false, reason: "ไฟล์สำรองไม่ครบ" };
+      }
+
+      const parsedCategories = [];
+      for (const item of data.categories) {
+        if (!item || !isText(item.id) || !isText(item.name) || !Number.isFinite(item.order)
+          || (item.type !== "expense" && item.type !== "income")) {
+          return { ok: false, reason: "ข้อมูลหมวดหมู่ในไฟล์เสียหาย" };
+        }
+        parsedCategories.push({ id: item.id, type: item.type, name: item.name, order: item.order });
+      }
+      const ids = new Set(parsedCategories.map((category) => category.id));
+      if (!ids.has(OTHER_CATEGORY.expense) || !ids.has(OTHER_CATEGORY.income)) {
+        return { ok: false, reason: "ข้อมูลหมวดหมู่ในไฟล์ไม่ครบ" };
+      }
+
+      const parsedEntries = [];
+      for (const item of data.entries) {
+        const valid = item && isText(item.id) && isText(item.categoryId) && isText(item.createdAt)
+          && (item.type === "expense" || item.type === "income")
+          && Number.isSafeInteger(item.amount) && item.amount > 0
+          && isText(item.date) && /^\d{4}-\d{2}-\d{2}$/.test(item.date)
+          && (item.note === undefined || isText(item.note))
+          && (item.payment == null || (isText(item.payment) && Object.hasOwn(PAYMENT_LABELS, item.payment)))
+          && (item.receipt == null || isText(item.receipt));
+        if (!valid) return { ok: false, reason: "ข้อมูลรายการในไฟล์เสียหาย" };
+
+        const receipt = item.receipt ? dataUrlToBlob(item.receipt) : null;
+        if (item.receipt && !receipt) return { ok: false, reason: "รูปใบเสร็จในไฟล์เสียหาย" };
+
+        parsedEntries.push({
+          id: item.id,
+          type: item.type,
+          amount: item.amount,
+          categoryId: item.categoryId,
+          date: item.date,
+          note: item.note ?? "",
+          payment: item.payment ?? null,
+          receipt,
+          createdAt: item.createdAt,
+          updatedAt: isText(item.updatedAt) ? item.updatedAt : item.createdAt,
+        });
+      }
+
+      return { ok: true, categories: parsedCategories, entries: parsedEntries, exportedAt: data.exportedAt };
+    }
+
+    // แทนที่ข้อมูลทั้งหมดในครั้งเดียว ถ้าพลาดข้อมูลเดิมจะยังอยู่ครบ
+    function replaceAllData(newCategories, newEntries) {
+      return new Promise((resolve, reject) => {
+        const transaction = db.transaction(["entries", "categories"], "readwrite");
+        const entryStore = transaction.objectStore("entries");
+        const categoryStore = transaction.objectStore("categories");
+        entryStore.clear();
+        categoryStore.clear();
+        newCategories.forEach((category) => categoryStore.put(category));
+        newEntries.forEach((entry) => entryStore.put(entry));
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+      });
+    }
+
+    async function saveBackupFile() {
+      const backup = await buildBackup();
+      const fileName = `สำรองรายรับรายจ่าย-${todayKey()}.json`;
+      const blob = new Blob([JSON.stringify(backup)], { type: "application/json" });
+      const file = new File([blob], fileName, { type: "application/json" });
+
+      // บนมือถือเปิดหน้าแชร์ (เลือก LINE / Drive / อีเมลได้) ถ้าทำไม่ได้ก็ดาวน์โหลดลงเครื่อง
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        try {
+          await navigator.share({ files: [file], title: fileName });
+          return "shared";
+        } catch (error) {
+          if (error.name === "AbortError") return "cancelled";
+        }
+      }
+
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = fileName;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10000);
+      return "downloaded";
+    }
+
+    function renderSettings() {
+      settingsTypeButtons.forEach((button) => {
+        button.setAttribute("aria-pressed", String(button.dataset.type === settingsType));
+      });
+
+      const counts = new Map();
+      entries.forEach((entry) => counts.set(entry.categoryId, (counts.get(entry.categoryId) ?? 0) + 1));
+
+      const list = document.getElementById("settings-categories");
+      list.replaceChildren(...categoriesOfType(settingsType).map((category) => {
+        const row = document.createElement("li");
+        row.className = "setting-row";
+
+        const name = document.createElement("span");
+        name.className = "name";
+        name.textContent = category.name;
+        row.append(name);
+
+        if (isOtherCategory(category)) {
+          const hint = document.createElement("span");
+          hint.className = "hint";
+          hint.textContent = "หมวดนี้แก้หรือลบไม่ได้";
+          row.append(hint);
+          return row;
+        }
+
+        const rename = document.createElement("button");
+        rename.type = "button";
+        rename.className = "row-button";
+        rename.textContent = "เปลี่ยนชื่อ";
+        rename.addEventListener("click", async () => {
+          const newName = await askName("เปลี่ยนชื่อหมวด", category.name,
+            (value) => nameProblem(value, category.type, category.id));
+          if (newName === null || newName === category.name) return;
+          try {
+            const updated = { ...category, name: newName };
+            await put(db, "categories", updated);
+            categories = categories.map((item) => (item.id === category.id ? updated : item));
+            renderSettings();
+            refreshLists();
+            showToast("เปลี่ยนชื่อแล้ว ✓");
+          } catch (error) {
+            showToast("เปลี่ยนชื่อไม่สำเร็จ ลองใหม่อีกครั้ง", true);
+          }
+        });
+
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "row-button danger";
+        remove.textContent = "ลบ";
+        remove.addEventListener("click", async () => {
+          const count = counts.get(category.id) ?? 0;
+          const question = count > 0
+            ? `ลบหมวด "${category.name}" จริงไหม? รายการ ${count} รายการในหมวดนี้จะย้ายไปอยู่ "อื่นๆ"`
+            : `ลบหมวด "${category.name}" จริงไหม?`;
+          if (!(await askConfirm(question))) return;
+          try {
+            const moved = await deleteCategory(category);
+            const movedById = new Map(moved.map((entry) => [entry.id, entry]));
+            entries = entries.map((entry) => movedById.get(entry.id) ?? entry);
+            categories = categories.filter((item) => item.id !== category.id);
+            if (historyCategoryId === category.id) historyCategoryId = null;
+            renderSettings();
+            refreshLists();
+            showToast("ลบหมวดแล้ว");
+          } catch (error) {
+            showToast("ลบไม่สำเร็จ ลองใหม่อีกครั้ง", true);
+          }
+        });
+
+        row.append(rename, remove);
+        return row;
+      }));
+    }
+
+    function renderCategories() {
+      categoryGrid.replaceChildren();
+      categoriesOfType(selectedType)
+        .forEach((category) => {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "choice";
+          button.textContent = category.name;
+          button.setAttribute("aria-pressed", String(category.id === selectedCategoryId));
+          button.addEventListener("click", () => {
+            selectedCategoryId = category.id;
+            categoryError.hidden = true;
+            renderCategories();
+          });
+          categoryGrid.append(button);
+        });
+    }
+
+    function selectPayment(payment) {
+      selectedPayment = payment;
+      paymentButtons.forEach((button) => {
+        button.setAttribute("aria-pressed", String(button.dataset.payment === payment));
+      });
+    }
+
+    // วิธีจ่ายใช้กับรายจ่ายเท่านั้น
+    function selectType(type) {
+      selectedType = type;
+      selectedCategoryId = null;
+      typeButtons.forEach((button) => {
+        button.setAttribute("aria-pressed", String(button.dataset.type === type));
+      });
+      paymentSection.hidden = type !== "expense";
+      if (type !== "expense") selectPayment(null);
+      renderCategories();
+    }
+
+    function setReceipt(blob) {
+      selectedReceipt = blob;
+      if (previewPhotoUrl) URL.revokeObjectURL(previewPhotoUrl);
+      previewPhotoUrl = blob ? URL.createObjectURL(blob) : null;
+      if (previewPhotoUrl) photoPreviewImg.src = previewPhotoUrl;
+      else photoPreviewImg.removeAttribute("src");
+      photoPreview.hidden = !blob;
+      photoButton.hidden = Boolean(blob);
+      photoInput.value = "";
+    }
+
+    function openViewer(url) {
+      viewerImg.src = url;
+      viewer.hidden = false;
+      document.getElementById("viewer-close").focus();
+    }
+
+    function closeViewer() {
+      viewer.hidden = true;
+      viewerImg.removeAttribute("src");
+    }
+
+    function showDetails(open) {
+      details.hidden = !open;
+      detailsToggle.setAttribute("aria-expanded", String(open));
+      detailsToggle.textContent = open ? "− ซ่อนรายละเอียด" : "+ ใส่รายละเอียด (ไม่ใส่ก็ได้)";
+    }
+
+    function setDate(key) {
+      dateInput.value = key;
+      dateError.hidden = true;
+      dateLabel.textContent = key ? formatThaiDate(key) : "";
+      dateQuickButtons.forEach((button) => {
+        button.setAttribute("aria-pressed", String(daysAgoKey(Number(button.dataset.daysAgo)) === key));
+      });
+    }
+
+    // ไม่ส่ง entry = จดรายการใหม่, ส่ง entry = แก้รายการเดิม
+    function openAddView(entry = null) {
+      editingEntry = entry;
+      addForm.reset();
+      amountError.hidden = true;
+      categoryError.hidden = true;
+
+      if (entry) {
+        selectType(entry.type);
+        selectedCategoryId = entry.categoryId;
+        renderCategories();
+        amountInput.value = String(entry.amount / 100);
+        setDate(entry.date);
+        noteInput.value = entry.note ?? "";
+        selectPayment(entry.payment ?? null);
+        setReceipt(entry.receipt ?? null);
+        showDetails(Boolean(entry.note || entry.payment || entry.receipt));
+      } else {
+        selectType("expense");
+        setDate(todayKey());
+        selectPayment(null);
+        setReceipt(null);
+        showDetails(false);
+      }
+
+      formTitle.textContent = entry ? "แก้รายการ" : "จดรายการใหม่";
+      saveButton.textContent = entry ? "บันทึกการแก้ไข" : "บันทึก";
+      deleteButton.hidden = !entry;
+      returnView = historyView.hidden ? homeView : historyView;
+      showView(addView);
+      if (!entry) amountInput.focus();
+    }
+
+    function closeAddView() {
+      showView(returnView ?? homeView);
+    }
+
+    // วาดใหม่ทุกหน้าที่แสดงรายการ หลังข้อมูลเปลี่ยน
+    function refreshLists() {
+      renderHome();
+      renderHistory();
+    }
+
+    typeButtons.forEach((button) => {
+      button.addEventListener("click", () => selectType(button.dataset.type));
+    });
+
+    amountInput.addEventListener("input", () => { amountError.hidden = true; });
+
+    dateQuickButtons.forEach((button) => {
+      button.addEventListener("click", () => setDate(daysAgoKey(Number(button.dataset.daysAgo))));
+    });
+    dateInput.addEventListener("change", () => setDate(dateInput.value));
+
+    detailsToggle.addEventListener("click", () => showDetails(details.hidden));
+
+    photoInput.addEventListener("change", async () => {
+      const file = photoInput.files[0];
+      if (!file) return;
+      try {
+        setReceipt(await shrinkImage(file));
+      } catch (error) {
+        photoInput.value = "";
+        showToast("เปิดรูปนี้ไม่ได้ ลองเลือกรูปอื่น", true);
+      }
+    });
+
+    document.getElementById("remove-photo").addEventListener("click", () => setReceipt(null));
+
+    document.getElementById("viewer-close").addEventListener("click", closeViewer);
+    viewer.addEventListener("click", (event) => {
+      if (event.target === viewer) closeViewer();
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && !viewer.hidden) closeViewer();
+    });
+
+    // กดปุ่มเดิมซ้ำเพื่อยกเลิกการเลือก
+    paymentButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        selectPayment(selectedPayment === button.dataset.payment ? null : button.dataset.payment);
+      });
+    });
+
+    document.getElementById("add-button").addEventListener("click", () => openAddView());
+    document.getElementById("back-button").addEventListener("click", closeAddView);
+
+    document.getElementById("history-button").addEventListener("click", () => {
+      historyMonth = todayKey().slice(0, 7);
+      historyCategoryId = null;
+      renderHistory();
+      showView(historyView);
+    });
+    document.getElementById("history-back").addEventListener("click", () => showView(homeView));
+
+    document.getElementById("settings-button").addEventListener("click", () => {
+      renderSettings();
+      showView(settingsView);
+    });
+    document.getElementById("settings-back").addEventListener("click", () => showView(homeView));
+    settingsTypeButtons.forEach((button) => {
+      button.addEventListener("click", () => {
+        settingsType = button.dataset.type;
+        renderSettings();
+      });
+    });
+
+    document.getElementById("backup-button").addEventListener("click", async () => {
+      try {
+        const result = await saveBackupFile();
+        if (result === "shared") showToast("ส่งไฟล์สำรองแล้ว ✓");
+        if (result === "downloaded") showToast("บันทึกไฟล์สำรองลงเครื่องแล้ว ✓");
+      } catch (error) {
+        showToast("สำรองไม่สำเร็จ ลองใหม่อีกครั้ง", true);
+      }
+    });
+
+    const restoreInput = document.getElementById("restore-input");
+    restoreInput.addEventListener("change", async () => {
+      const file = restoreInput.files[0];
+      restoreInput.value = "";
+      if (!file) return;
+
+      let parsed;
+      try {
+        parsed = parseBackup(JSON.parse(await file.text()));
+      } catch (error) {
+        parsed = { ok: false, reason: "เปิดไฟล์นี้ไม่ได้ ไฟล์อาจไม่ใช่ไฟล์สำรอง" };
+      }
+      if (!parsed.ok) {
+        showToast(parsed.reason, true);
+        return;
+      }
+
+      const backupDate = isText(parsed.exportedAt) && !Number.isNaN(Date.parse(parsed.exportedAt))
+        ? " (สำรองไว้เมื่อ" + formatThaiDate(dateKey(new Date(parsed.exportedAt))) + ")"
+        : "";
+      const question = `นำข้อมูลกลับจากไฟล์นี้${backupDate}? ข้อมูลในเครื่องตอนนี้จะถูกแทนที่ด้วยข้อมูลในไฟล์ ${parsed.entries.length} รายการ`;
+      if (!(await askConfirm(question, "นำข้อมูลกลับ", "ยกเลิก"))) return;
+
+      try {
+        await replaceAllData(parsed.categories, parsed.entries);
+        categories = parsed.categories;
+        entries = parsed.entries;
+        historyCategoryId = null;
+        renderSettings();
+        refreshLists();
+        showToast(`นำข้อมูลกลับแล้ว ✓ ${parsed.entries.length} รายการ`);
+      } catch (error) {
+        showToast("นำข้อมูลกลับไม่สำเร็จ ข้อมูลเดิมยังอยู่ครบ", true);
+      }
+    });
+
+    document.getElementById("add-category").addEventListener("click", async () => {
+      const type = settingsType;
+      const name = await askName(type === "expense" ? "ชื่อหมวดรายจ่ายใหม่" : "ชื่อหมวดรายรับใหม่", "",
+        (value) => nameProblem(value, type));
+      if (name === null) return;
+      const category = {
+        id: newId(),
+        type,
+        name,
+        order: Math.max(0, ...categories.map((item) => item.order)) + 1,
+      };
+      try {
+        await put(db, "categories", category);
+        categories.push(category);
+        renderSettings();
+        showToast("เพิ่มหมวดแล้ว ✓");
+      } catch (error) {
+        showToast("เพิ่มไม่สำเร็จ ลองใหม่อีกครั้ง", true);
+      }
+    });
+    document.getElementById("prev-month").addEventListener("click", () => {
+      historyMonth = shiftMonth(historyMonth, -1);
+      renderHistory();
+    });
+    document.getElementById("next-month").addEventListener("click", () => {
+      historyMonth = shiftMonth(historyMonth, 1);
+      renderHistory();
+    });
+
+    deleteButton.addEventListener("click", async () => {
+      if (!(await askConfirm("ลบรายการนี้จริงไหม?"))) return;
+      try {
+        await remove(db, "entries", editingEntry.id);
+        entries = entries.filter((entry) => entry.id !== editingEntry.id);
+        refreshLists();
+        closeAddView();
+        showToast("ลบแล้ว");
+      } catch (error) {
+        showToast("ลบไม่สำเร็จ ลองใหม่อีกครั้ง", true);
+      }
+    });
+
+    addForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+
+      const amount = parseAmountToSatang(amountInput.value);
+      const date = dateInput.value;
+      amountError.hidden = amount !== null;
+      dateError.hidden = date !== "";
+      categoryError.hidden = selectedCategoryId !== null;
+      if (amount === null) {
+        amountInput.focus();
+        return;
+      }
+      if (date === "" || selectedCategoryId === null) return;
+
+      const now = new Date().toISOString();
+      const entry = {
+        id: editingEntry ? editingEntry.id : newId(),
+        type: selectedType,
+        amount,
+        categoryId: selectedCategoryId,
+        date,
+        note: noteInput.value.trim(),
+        payment: selectedPayment,
+        receipt: selectedReceipt,
+        createdAt: editingEntry ? editingEntry.createdAt : now,
+        updatedAt: now,
+      };
+
+      try {
+        await put(db, "entries", entry);
+        entries = entries.filter((existing) => existing.id !== entry.id);
+        entries.push(entry);
+        refreshLists();
+        closeAddView();
+        showToast(date === todayKey() ? "บันทึกแล้ว ✓" : "บันทึกแล้ว ✓ ลง" + formatThaiDate(date));
+      } catch (error) {
+        showToast("บันทึกไม่สำเร็จ ลองใหม่อีกครั้ง", true);
+      }
+    });
+
+    // ---------- ใช้งานแบบไม่มีเน็ต (ทำงานเฉพาะตอนเปิดผ่านเว็บ ไม่ใช่เปิดไฟล์ในเครื่อง) ----------
+    if (location.protocol === "https:" || location.hostname === "localhost") {
+      if ("serviceWorker" in navigator) {
+        navigator.serviceWorker.register("sw.js").catch(() => {});
+      }
+      // ขอให้เบราว์เซอร์ไม่ลบข้อมูลของแอปเองตอนเครื่องพื้นที่ใกล้เต็ม
+      if (navigator.storage && navigator.storage.persist) {
+        navigator.storage.persist().catch(() => {});
+      }
+    }
+
+    // ---------- เริ่มต้น ----------
+    (async () => {
+      try {
+        db = await openDb();
+        categories = await getAll(db, "categories");
+        entries = await getAll(db, "entries");
+        renderHome();
+      } catch (error) {
+        document.getElementById("add-button").disabled = true;
+        showToast("เปิดที่เก็บข้อมูลไม่ได้ ลองเปิดด้วย Chrome หรือ Edge", true);
+      }
+    })();
+  </script>
+</body>
+</html>
