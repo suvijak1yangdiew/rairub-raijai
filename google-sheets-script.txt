@@ -1,0 +1,99 @@
+/**
+ * สมุดรายรับรายจ่าย: รับข้อมูลจากแอปมาเก็บในชีตนี้
+ * วิธีติดตั้งอยู่ในไฟล์ คู่มือ-google-sheets.md
+ *
+ * แอปส่งมาได้ 2 แบบ:
+ *   { ops: [{ op: "upsert", row }, { op: "delete", id }] }  ส่งเฉพาะรายการที่เปลี่ยน
+ *   { mode: "replace", rows: [row, ...] }                    ส่งทั้งหมด เขียนทับทั้งชีต
+ */
+
+var SHEET_NAME = "รายการ";
+var HEADERS = ["รหัส", "วันที่", "ประเภท", "หมวด", "จำนวนเงิน (บาท)", "บันทึก", "วิธีจ่าย", "มีรูปใบเสร็จ", "จดเมื่อ", "แก้ล่าสุด"];
+
+// ใช้ตอนแอปทดสอบการเชื่อมต่อ
+function doGet() {
+  return json_({ ok: true, app: "rairub-raijai" });
+}
+
+function doPost(e) {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    var body = JSON.parse(e.postData.contents);
+    var sheet = getSheet_();
+    if (body.mode === "replace") {
+      replaceAll_(sheet, body.rows || []);
+    } else {
+      (body.ops || []).forEach(function (op) {
+        if (op.op === "delete") deleteRow_(sheet, op.id);
+        else if (op.op === "upsert") upsertRow_(sheet, op.row);
+      });
+    }
+    return json_({ ok: true });
+  } catch (error) {
+    return json_({ ok: false, error: String(error) });
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function getSheet_() {
+  var spreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = spreadsheet.getSheetByName(SHEET_NAME) || spreadsheet.insertSheet(SHEET_NAME);
+  if (sheet.getLastRow() === 0) {
+    sheet.appendRow(HEADERS);
+    sheet.setFrozenRows(1);
+    sheet.getRange(1, 1, 1, HEADERS.length).setFontWeight("bold");
+    sheet.getRange("A:A").setNumberFormat("@");
+  }
+  return sheet;
+}
+
+function toValues_(row) {
+  return [
+    String(row.id),
+    row.date,
+    row.type === "income" ? "รายรับ" : "รายจ่าย",
+    row.category,
+    Number(row.amount),
+    row.note || "",
+    row.payment || "",
+    row.hasReceipt ? "มี" : "",
+    row.createdAt ? new Date(row.createdAt) : "",
+    row.updatedAt ? new Date(row.updatedAt) : "",
+  ];
+}
+
+// หาแถวจากรหัส; คืนเลขแถวในชีต หรือ 0 ถ้าไม่มี
+function findRow_(sheet, id) {
+  var last = sheet.getLastRow();
+  if (last < 2) return 0;
+  var ids = sheet.getRange(2, 1, last - 1, 1).getValues();
+  for (var i = 0; i < ids.length; i++) {
+    if (String(ids[i][0]) === String(id)) return i + 2;
+  }
+  return 0;
+}
+
+function upsertRow_(sheet, row) {
+  var values = toValues_(row);
+  var at = findRow_(sheet, row.id);
+  if (at) sheet.getRange(at, 1, 1, values.length).setValues([values]);
+  else sheet.appendRow(values);
+}
+
+function deleteRow_(sheet, id) {
+  var at = findRow_(sheet, id);
+  if (at) sheet.deleteRow(at);
+}
+
+function replaceAll_(sheet, rows) {
+  var last = sheet.getLastRow();
+  if (last > 1) sheet.getRange(2, 1, last - 1, HEADERS.length).clearContent();
+  if (rows.length === 0) return;
+  sheet.getRange(2, 1, rows.length, HEADERS.length).setValues(rows.map(toValues_));
+}
+
+function json_(value) {
+  return ContentService.createTextOutput(JSON.stringify(value)).setMimeType(ContentService.MimeType.JSON);
+}

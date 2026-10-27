@@ -552,6 +552,28 @@
       margin: 0 0 12px;
     }
 
+    label.hint-text {
+      display: block;
+      margin-bottom: 8px;
+    }
+
+    .connect-button {
+      margin-top: 12px;
+    }
+
+    .sync-status {
+      background: var(--card);
+      border: 2px solid var(--income);
+      border-radius: 16px;
+      padding: 14px 18px;
+      margin: 0;
+    }
+
+    .sync-status.error {
+      border-color: var(--expense);
+      color: var(--expense);
+    }
+
     .file-button {
       position: relative;
       display: flex;
@@ -780,6 +802,20 @@
         <span>📂 นำข้อมูลกลับจากไฟล์</span>
         <input id="restore-input" type="file" accept=".json,application/json">
       </label>
+
+      <h2>สำรองอัตโนมัติ (Google Sheets)</h2>
+      <div id="sheet-connect">
+        <p class="hint-text">ส่งทุกรายการที่จด แก้ หรือลบ เข้า Google Sheets ของคุณเอง ไม่มีเน็ตก็จดได้ แอปจะส่งให้เองเมื่อเน็ตกลับมา (รูปใบเสร็จไม่ถูกส่ง ใช้ "สำรองเป็นไฟล์" แทน)</p>
+        <label class="hint-text" for="sheet-url">วางลิงก์ที่ได้จาก Google Sheets (ลงท้ายด้วย /exec)</label>
+        <input class="note-input" id="sheet-url" type="url" inputmode="url" autocomplete="off" placeholder="https://script.google.com/macros/s/.../exec">
+        <p class="error" id="sheet-error" hidden></p>
+        <button class="big-button connect-button" id="sheet-connect-button" type="button">🔗 เชื่อมต่อ</button>
+      </div>
+      <div id="sheet-connected" hidden>
+        <p class="sync-status" id="sync-status" role="status"></p>
+        <button class="secondary-button" id="sync-now" type="button">🔄 ส่งข้อมูลทั้งหมดอีกครั้ง</button>
+        <button class="delete-entry" id="sheet-disconnect" type="button">เลิกเชื่อมต่อ</button>
+      </div>
     </main>
   </div>
 
@@ -873,7 +909,7 @@
   <script>
     // ---------- ที่เก็บข้อมูลในเครื่อง ----------
     const DB_NAME = "rairub-raijai";
-    const DB_VERSION = 1;
+    const DB_VERSION = 2;
 
     const DEFAULT_CATEGORIES = [
       { id: "food", type: "expense", name: "อาหาร" },
@@ -893,11 +929,19 @@
     function openDb() {
       return new Promise((resolve, reject) => {
         const request = indexedDB.open(DB_NAME, DB_VERSION);
-        request.onupgradeneeded = () => {
+        // เพิ่มทีละรุ่น เพื่อให้เครื่องที่มีข้อมูลอยู่แล้วอัปเกรดได้โดยข้อมูลไม่หาย
+        request.onupgradeneeded = (event) => {
           const db = request.result;
-          db.createObjectStore("entries", { keyPath: "id" });
-          const categories = db.createObjectStore("categories", { keyPath: "id" });
-          DEFAULT_CATEGORIES.forEach((category, order) => categories.add({ ...category, order }));
+          if (event.oldVersion < 1) {
+            db.createObjectStore("entries", { keyPath: "id" });
+            const categories = db.createObjectStore("categories", { keyPath: "id" });
+            DEFAULT_CATEGORIES.forEach((category, order) => categories.add({ ...category, order }));
+          }
+          if (event.oldVersion < 2) {
+            // outbox: รายการที่รอส่งเข้า Google Sheets, settings: ค่าของเครื่องนี้ (ไม่อยู่ในไฟล์สำรอง)
+            db.createObjectStore("outbox", { keyPath: "id" });
+            db.createObjectStore("settings", { keyPath: "key" });
+          }
         };
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error);
@@ -1534,7 +1578,220 @@
       return "downloaded";
     }
 
+    // ---------- สำรองอัตโนมัติเข้า Google Sheets ----------
+    // ลิงก์ชีตเก็บเฉพาะในเครื่องนี้ (store "settings") ไม่อยู่ในโค้ดบน GitHub และไม่อยู่ในไฟล์สำรอง
+    const SHEET_URL_PATTERN = /^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/;
+    const SYNC_TIMEOUT_MS = 20000;
+    let sheetUrl = null;
+    let lastSyncAt = null;
+    let needsFullSync = false;
+    let pendingCount = 0;
+    let syncError = false;
+    let syncing = null;
+
+    function getSetting(key) {
+      return new Promise((resolve, reject) => {
+        const request = db.transaction("settings").objectStore("settings").get(key);
+        request.onsuccess = () => resolve(request.result?.value ?? null);
+        request.onerror = () => reject(request.error);
+      });
+    }
+
+    function setSetting(key, value) {
+      return put(db, "settings", { key, value });
+    }
+
+    function toSheetRow(entry) {
+      return {
+        id: entry.id,
+        date: entry.date,
+        type: entry.type,
+        category: categoryNameMap().get(entry.categoryId) ?? "อื่นๆ",
+        amount: entry.amount / 100,
+        note: entry.note ?? "",
+        payment: PAYMENT_LABELS[entry.payment] ?? "",
+        hasReceipt: Boolean(entry.receipt),
+        createdAt: entry.createdAt,
+        updatedAt: entry.updatedAt ?? entry.createdAt,
+      };
+    }
+
+    async function sendToSheet(payload) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), SYNC_TIMEOUT_MS);
+      try {
+        // text/plain ทำให้ส่งตรงไป Google ได้โดยไม่ต้องขออนุญาตล่วงหน้า (CORS preflight)
+        const response = await fetch(sheetUrl, {
+          method: "POST",
+          headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body: JSON.stringify(payload),
+          signal: controller.signal,
+        });
+        const result = await response.json();
+        if (!result.ok) throw new Error(result.error || "ชีตตอบกลับว่าไม่สำเร็จ");
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
+    // จดรายการที่เปลี่ยนไว้ในคิวก่อน แล้วค่อยส่ง ถ้าไม่มีเน็ตก็ยังอยู่ในคิวจนกว่าจะส่งได้
+    // รหัสรายการเป็นกุญแจ แก้หลายครั้งก่อนส่งจึงเหลือแค่ครั้งล่าสุด
+    async function queueSync(ids, op) {
+      if (!sheetUrl || ids.length === 0) return;
+      const at = new Date().toISOString();
+      await new Promise((resolve, reject) => {
+        const transaction = db.transaction("outbox", "readwrite");
+        const store = transaction.objectStore("outbox");
+        ids.forEach((id) => store.put({ id, op, at }));
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+      });
+      syncSoon();
+    }
+
+    // หลังนำข้อมูลกลับจากไฟล์ หรือเชื่อมต่อใหม่: ส่งทั้งหมดเขียนทับชีต
+    async function queueFullSync() {
+      if (!sheetUrl) return;
+      needsFullSync = true;
+      await setSetting("needsFullSync", true);
+      syncSoon();
+    }
+
+    function syncSoon() {
+      flushSync().catch(() => {});
+    }
+
+    // ส่งทีละรอบเท่านั้น ถ้ามีคนเรียกระหว่างกำลังส่ง จะส่งต่ออีกรอบหลังรอบนี้จบ
+    async function flushSync() {
+      if (syncing) {
+        await syncing.catch(() => {});
+        return flushSync();
+      }
+      syncing = runSync();
+      try {
+        await syncing;
+      } finally {
+        syncing = null;
+      }
+    }
+
+    async function runSync() {
+      if (!sheetUrl || !db) return;
+      const queued = await getAll(db, "outbox");
+      pendingCount = needsFullSync ? entries.length : queued.length;
+      if (!needsFullSync && queued.length === 0) {
+        renderSyncStatus();
+        return;
+      }
+
+      try {
+        if (needsFullSync) {
+          await sendToSheet({ mode: "replace", rows: entries.map(toSheetRow) });
+          needsFullSync = false;
+          await setSetting("needsFullSync", false);
+          // ส่งทั้งหมดแล้ว คิวที่ค้างอยู่ก่อนหน้านี้ไม่ต้องส่งซ้ำ
+          await removeFromOutbox(queued);
+        } else {
+          const current = new Map(entries.map((entry) => [entry.id, entry]));
+          const ops = queued.map((item) => {
+            const entry = current.get(item.id);
+            return item.op === "upsert" && entry
+              ? { op: "upsert", row: toSheetRow(entry) }
+              : { op: "delete", id: item.id };
+          });
+          await sendToSheet({ ops });
+          await removeFromOutbox(queued);
+        }
+        syncError = false;
+        lastSyncAt = new Date().toISOString();
+        await setSetting("lastSyncAt", lastSyncAt);
+      } catch (error) {
+        syncError = true;
+      }
+      pendingCount = needsFullSync ? entries.length : (await getAll(db, "outbox")).length;
+      renderSyncStatus();
+    }
+
+    // ลบออกจากคิวเฉพาะรายการที่ไม่ได้ถูกแก้อีกระหว่างที่กำลังส่ง
+    function removeFromOutbox(sent) {
+      return new Promise((resolve, reject) => {
+        const transaction = db.transaction("outbox", "readwrite");
+        const store = transaction.objectStore("outbox");
+        sent.forEach((item) => {
+          const request = store.get(item.id);
+          request.onsuccess = () => {
+            if (request.result && request.result.at === item.at) store.delete(item.id);
+          };
+        });
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+      });
+    }
+
+    function formatDateTime(iso) {
+      return new Date(iso).toLocaleString("th-TH", {
+        day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit",
+      });
+    }
+
+    function renderSyncStatus() {
+      const connected = Boolean(sheetUrl);
+      document.getElementById("sheet-connect").hidden = connected;
+      document.getElementById("sheet-connected").hidden = !connected;
+      if (!connected) return;
+
+      const lines = [];
+      lines.push(lastSyncAt ? "ส่งล่าสุดเมื่อ " + formatDateTime(lastSyncAt) : "ยังไม่ได้ส่ง");
+      if (pendingCount > 0) {
+        lines.push(syncError
+          ? `ยังส่งไม่สำเร็จ ${pendingCount} รายการ จะลองใหม่เองเมื่อมีเน็ต`
+          : `กำลังรอส่ง ${pendingCount} รายการ`);
+      } else {
+        lines.push("ส่งครบทุกรายการแล้ว ✓");
+      }
+      const status = document.getElementById("sync-status");
+      status.textContent = lines.join(" · ");
+      status.classList.toggle("error", syncError && pendingCount > 0);
+    }
+
+    async function connectSheet(url) {
+      if (!SHEET_URL_PATTERN.test(url)) {
+        return "ลิงก์ไม่ถูกต้อง ต้องขึ้นต้นด้วย https://script.google.com/macros/s/ และลงท้ายด้วย /exec";
+      }
+      try {
+        const response = await fetch(url);
+        const result = await response.json();
+        if (!result.ok || result.app !== "rairub-raijai") throw new Error("not our script");
+      } catch (error) {
+        return "เชื่อมต่อไม่ได้ ตรวจว่ามีเน็ต และตั้งค่าใน Google ให้ \"ทุกคน\" เข้าถึงได้ตามคู่มือ";
+      }
+      sheetUrl = url;
+      await setSetting("sheetUrl", url);
+      await queueFullSync();
+      return null;
+    }
+
+    async function disconnectSheet() {
+      sheetUrl = null;
+      needsFullSync = false;
+      lastSyncAt = null;
+      syncError = false;
+      pendingCount = 0;
+      await setSetting("sheetUrl", null);
+      await setSetting("needsFullSync", false);
+      await setSetting("lastSyncAt", null);
+      await removeFromOutbox(await getAll(db, "outbox"));
+      renderSyncStatus();
+    }
+
+    async function loadSyncSettings() {
+      sheetUrl = await getSetting("sheetUrl");
+      lastSyncAt = await getSetting("lastSyncAt");
+      needsFullSync = Boolean(await getSetting("needsFullSync"));
+    }
+
     function renderSettings() {
+      renderSyncStatus();
       settingsTypeButtons.forEach((button) => {
         button.setAttribute("aria-pressed", String(button.dataset.type === settingsType));
       });
@@ -1574,6 +1831,9 @@
             categories = categories.map((item) => (item.id === category.id ? updated : item));
             renderSettings();
             refreshLists();
+            // ชื่อหมวดในชีตต้องเปลี่ยนตาม
+            const renamed = entries.filter((entry) => entry.categoryId === category.id).map((entry) => entry.id);
+            queueSync(renamed, "upsert").catch(() => {});
             showToast("เปลี่ยนชื่อแล้ว ✓");
           } catch (error) {
             showToast("เปลี่ยนชื่อไม่สำเร็จ ลองใหม่อีกครั้ง", true);
@@ -1598,6 +1858,7 @@
             if (historyCategoryId === category.id) historyCategoryId = null;
             renderSettings();
             refreshLists();
+            queueSync(moved.map((entry) => entry.id), "upsert").catch(() => {});
             showToast("ลบหมวดแล้ว");
           } catch (error) {
             showToast("ลบไม่สำเร็จ ลองใหม่อีกครั้ง", true);
@@ -1831,9 +2092,47 @@
         renderSettings();
         refreshLists();
         showToast(`นำข้อมูลกลับแล้ว ✓ ${parsed.entries.length} รายการ`);
+        // ให้ชีตตรงกับข้อมูลที่นำกลับมาทั้งหมด
+        queueFullSync().catch(() => {});
       } catch (error) {
         showToast("นำข้อมูลกลับไม่สำเร็จ ข้อมูลเดิมยังอยู่ครบ", true);
       }
+    });
+
+    document.getElementById("sheet-connect-button").addEventListener("click", async (event) => {
+      const button = event.currentTarget;
+      const error = document.getElementById("sheet-error");
+      error.hidden = true;
+      button.disabled = true;
+      button.textContent = "กำลังเชื่อมต่อ...";
+      const problem = await connectSheet(document.getElementById("sheet-url").value.trim());
+      button.disabled = false;
+      button.textContent = "🔗 เชื่อมต่อ";
+      if (problem) {
+        error.textContent = problem;
+        error.hidden = false;
+        return;
+      }
+      document.getElementById("sheet-url").value = "";
+      renderSyncStatus();
+      showToast("เชื่อมต่อแล้ว ✓ กำลังส่งข้อมูลทั้งหมด");
+    });
+
+    document.getElementById("sync-now").addEventListener("click", () => {
+      queueFullSync().catch(() => {});
+      showToast("กำลังส่งข้อมูลทั้งหมด");
+    });
+
+    document.getElementById("sheet-disconnect").addEventListener("click", async () => {
+      if (!(await askConfirm("เลิกส่งข้อมูลเข้า Google Sheets? ข้อมูลที่อยู่ในชีตแล้วจะยังอยู่", "เลิกเชื่อมต่อ", "ไม่เลิก"))) return;
+      await disconnectSheet();
+      showToast("เลิกเชื่อมต่อแล้ว");
+    });
+
+    // ลองส่งที่ค้างอยู่เมื่อเน็ตกลับมา และเมื่อกลับมาเปิดแอปอีกครั้ง
+    window.addEventListener("online", syncSoon);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") syncSoon();
     });
 
     document.getElementById("add-category").addEventListener("click", async () => {
@@ -1868,9 +2167,11 @@
     deleteButton.addEventListener("click", async () => {
       if (!(await askConfirm("ลบรายการนี้จริงไหม?"))) return;
       try {
-        await remove(db, "entries", editingEntry.id);
-        entries = entries.filter((entry) => entry.id !== editingEntry.id);
+        const deletedId = editingEntry.id;
+        await remove(db, "entries", deletedId);
+        entries = entries.filter((entry) => entry.id !== deletedId);
         refreshLists();
+        queueSync([deletedId], "delete").catch(() => {});
         closeAddView();
         showToast("ลบแล้ว");
       } catch (error) {
@@ -1917,6 +2218,7 @@
       entries = entries.filter((existing) => existing.id !== entry.id);
       entries.push(entry);
       refreshLists();
+      queueSync([entry.id], "upsert").catch(() => {});
       closeAddView();
       showToast(date === todayKey() ? "บันทึกแล้ว ✓" : "บันทึกแล้ว ✓ ลง" + formatThaiDate(date));
     });
@@ -1939,6 +2241,8 @@
         categories = await getAll(db, "categories");
         entries = await loadEntries();
         renderHome();
+        await loadSyncSettings();
+        syncSoon();
       } catch (error) {
         document.getElementById("add-button").disabled = true;
         showToast("เปิดที่เก็บข้อมูลไม่ได้ ลองเปิดด้วย Chrome หรือ Edge", true);
